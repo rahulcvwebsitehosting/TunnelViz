@@ -1,0 +1,5 @@
+{
+  "name": "TunnelViz",
+  "description": "Interactive 3D tunnel engineering education platform featuring parametric design, geological simulation, and construction method comparison.",
+  "requestFramePermissions": []
+}
