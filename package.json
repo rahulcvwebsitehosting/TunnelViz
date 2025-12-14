@@ -9,14 +9,14 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "react": "18.2.0",
     "react-dom": "^19.2.3",
     "@google/genai": "^1.33.0",
-    "@heroicons/react": "^2.2.0",
-    "react": "^19.2.3",
-    "recharts": "^3.5.1",
-    "@react-three/fiber": "^9.4.2",
-    "three": "^0.182.0",
-    "@react-three/drei": "^10.7.7"
+    "recharts": "2.12.3",
+    "@react-three/fiber": "8.16.1",
+    "three": "0.161.0",
+    "@react-three/drei": "9.102.6",
+    "@heroicons/react": "^2.2.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
