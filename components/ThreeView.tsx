@@ -939,7 +939,15 @@ export const ThreeView: React.FC<ThreeViewProps> = ({ design, layers, slice, sim
         
         <Inspector data={inspectData} clear={() => setInspectData(null)} />
         
-        <OrbitControls enableDamping minDistance={5} maxDistance={50} />
+        <OrbitControls 
+          enableDamping 
+          ref={(ref: any) => {
+            if (ref) {
+              ref.minDistance = 5;
+              ref.maxDistance = 50;
+            }
+          }} 
+        />
         <Environment preset="city" />
       </Canvas>
     </div>
