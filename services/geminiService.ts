@@ -8,7 +8,7 @@ export const askTunnelTutor = async (
   context: string
 ): Promise<string> => {
   try {
-    const model = 'gemini-2.5-flash';
+    const model = 'gemini-3-flash-preview';
     const systemInstruction = `You are Professor TunnelViz, a world-class expert in civil engineering and tunneling. 
     Your goal is to explain complex concepts simply to undergraduate students. 
     Keep answers concise (under 150 words) unless asked for detail. 

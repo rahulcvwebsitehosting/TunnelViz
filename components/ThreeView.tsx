@@ -1,31 +1,9 @@
 import React, { useRef, useMemo, useState, useEffect } from 'react';
-import { Canvas, useFrame, ThreeElements } from '@react-three/fiber';
+import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls, Environment, Html, Line, Cylinder } from '@react-three/drei';
 import * as THREE from 'three';
 import { TunnelDesign, GeologicalLayer, TunnelShape, ConstructionMethod, SimulationSettings, GeoMaterial } from '../types';
 import { EyeIcon, EyeSlashIcon, ViewfinderCircleIcon, BeakerIcon, ArrowDownIcon } from '@heroicons/react/24/outline';
-
-// Augment JSX namespace to include Three.js elements from R3F
-declare global {
-  namespace JSX {
-    interface IntrinsicElements {
-      ambientLight: any;
-      pointLight: any;
-      directionalLight: any;
-      group: any;
-      mesh: any;
-      instancedMesh: any;
-      primitive: any;
-      planeGeometry: any;
-      boxGeometry: any;
-      sphereGeometry: any;
-      cylinderGeometry: any;
-      meshBasicMaterial: any;
-      meshStandardMaterial: any;
-      gridHelper: any;
-    }
-  }
-}
 
 interface ThreeViewProps {
   design: TunnelDesign;
