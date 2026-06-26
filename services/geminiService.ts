@@ -1,13 +1,25 @@
 import { GoogleGenAI } from "@google/genai";
 
-// Initialize the client strictly according to instructions
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+let aiClient: GoogleGenAI | null = null;
+
+const getAiClient = (): GoogleGenAI => {
+  if (aiClient) return aiClient;
+
+  const apiKey = process.env.API_KEY;
+  if (!apiKey || apiKey === "undefined" || apiKey.trim() === "") {
+    throw new Error("API_KEY_MISSING");
+  }
+
+  aiClient = new GoogleGenAI({ apiKey });
+  return aiClient;
+};
 
 export const askTunnelTutor = async (
   question: string, 
   context: string
 ): Promise<string> => {
   try {
+    const ai = getAiClient();
     const model = 'gemini-3-flash-preview';
     const systemInstruction = `You are Professor TunnelViz, a world-class expert in civil engineering and tunneling. 
     Your goal is to explain complex concepts simply to undergraduate students. 
@@ -26,8 +38,11 @@ export const askTunnelTutor = async (
     });
 
     return response.text || "I couldn't generate a response. Please try again.";
-  } catch (error) {
+  } catch (error: any) {
     console.error("Gemini API Error:", error);
-    return "An error occurred while contacting the AI Tutor.";
+    if (error && error.message === "API_KEY_MISSING") {
+      return "⚠️ The Gemini API key is not set. To enable chat with Professor TunnelViz, please configure your API Key in the settings.";
+    }
+    return "An error occurred while contacting the AI Tutor. Please verify your API key.";
   }
 };
