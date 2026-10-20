@@ -1,8 +1,10 @@
-import React, { useMemo, useEffect, useState } from 'react';
+import React, { useMemo, useEffect, useState, useCallback } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
-import { OrbitControls, Line } from '@react-three/drei';
+import { Line } from '@react-three/drei';
 import * as THREE from 'three';
-import { surfaceTexture, segmentShape } from './materials';
+import { CameraRig } from './CameraRig';
+import { PlayIcon, PauseIcon, ArrowPathIcon, CubeIcon, ScissorsIcon, EyeIcon, Square3Stack3DIcon } from '@heroicons/react/24/outline';
+import { surfaceTexture, segmentShape, segmentUV } from './materials';
 import { TunnelShape, ConstructionMethod, type TunnelDesign, type GeologicalLayer, type SimulationSettings } from '../types';
 import { alignment, evaluateTunnel, profile, sectionDimensions, MODEL_LENGTH } from '../services/engineering';
 interface ThreeViewProps {design:TunnelDesign;layers:GeologicalLayer[];slice:number;simulation:SimulationSettings;highlightedLayerId?:string|null;}
@@ -40,15 +42,15 @@ const Lining=React.memo(function Lining({design}:{design:TunnelDesign}) {
  });
  return <group>{rings.map((r,i)=><group key={i} position={r.position} quaternion={r.quaternion}>
   {design.method===ConstructionMethod.TBM && design.shape===TunnelShape.Circular ? Array.from({length:design.segmentCount},(_,j)=><mesh key={`segment-${j}`} rotation={[0,0,2*Math.PI*(j+(i%2)*.5)/design.segmentCount]} castShadow receiveShadow>
-   <extrudeGeometry args={[segment,{depth:Math.max(.01,r.length-.012),bevelEnabled:true,bevelThickness:.004,bevelSize:.004,bevelSegments:1,steps:1,curveSegments:24}]}/>
-   <meshStandardMaterial map={texture} bumpMap={texture} bumpScale={.014} color={j%3===0?'#c1c0b7':'#d5d3ca'} roughness={.92}/>
-  </mesh>):<mesh castShadow receiveShadow><extrudeGeometry args={[shape,{depth:Math.max(.01,r.length-.012),bevelEnabled:false,steps:1,curveSegments:48}]}/><meshStandardMaterial map={texture} bumpMap={texture} bumpScale={design.method===ConstructionMethod.NATM?.05:.014} color="#babbb2" roughness={.96}/></mesh>}
+   <extrudeGeometry args={[segment,{depth:Math.max(.01,r.length-.012),bevelEnabled:true,bevelThickness:.004,bevelSize:.004,bevelSegments:1,steps:1,curveSegments:24,UVGenerator:segmentUV}]}/>
+   <meshStandardMaterial map={texture} bumpMap={texture} bumpScale={.003} color={['#d0cec4','#c5c4bc','#d8d6cc','#cccac2'][(i+j)%4]} roughness={.92}/>
+  </mesh>):<mesh castShadow receiveShadow><extrudeGeometry args={[shape,{depth:Math.max(.01,r.length-.012),bevelEnabled:false,steps:1,curveSegments:48}]}/><meshStandardMaterial map={texture} bumpMap={texture} bumpScale={design.method===ConstructionMethod.NATM?.016:.003} color="#babbb2" roughness={.96}/></mesh>}
   {design.method===ConstructionMethod.TBM && design.shape===TunnelShape.Circular && Array.from({length:design.segmentCount},(_,j)=>{
    const angle=2*Math.PI*(j+(i%2)*0.5)/design.segmentCount;
    const radius=design.width/2-design.wallThickness-0.008;
    return <group key={j}>
     
-    {[0.13,Math.max(0.14,r.length-0.14)].map((z,k)=><mesh key={k} position={[radius*Math.cos(angle+0.06),radius*Math.sin(angle+0.06),z]} rotation={[0,0,angle-Math.PI/2]}><cylinderGeometry args={[0.045,0.045,0.018,6]}/><meshStandardMaterial color="#707779" metalness={0.7} roughness={0.5}/></mesh>)}
+    {[0.13,Math.max(0.14,r.length-0.14)].map((z,k)=><group key={k}><mesh position={[radius*Math.cos(angle+0.06),radius*Math.sin(angle+0.06),z]} rotation={[0,0,angle-Math.PI/2]}><cylinderGeometry args={[.078,.078,.008,16]}/><meshStandardMaterial color="#626762" roughness={.85}/></mesh><mesh key={k} position={[radius*Math.cos(angle+0.06),radius*Math.sin(angle+0.06),z]} rotation={[0,0,angle-Math.PI/2]}><cylinderGeometry args={[0.045,0.045,0.018,6]}/><meshStandardMaterial color="#707779" metalness={0.7} roughness={0.5}/></mesh></group>)}
    </group>;
   })}
   {design.method===ConstructionMethod.NATM && Array.from({length:7},(_,j)=>{
@@ -57,16 +59,7 @@ const Lining=React.memo(function Lining({design}:{design:TunnelDesign}) {
   })}
  </group>)}</group>;
 });
-function FitCamera({mode,design,station,reset}:{mode:string;design:TunnelDesign;station:number;reset:number}) {
- const {camera}=useThree();
- useEffect(()=>{
-  if(mode==='inside')camera.position.copy(new THREE.Vector3(0,-sectionDimensions(design).height*.08,0).applyQuaternion(transform(design,18).quaternion).add(transform(design,18).position));
-  else if(mode==='section')camera.position.copy(new THREE.Vector3(0,0,design.width*2.1).applyQuaternion(transform(design,station).quaternion).add(transform(design,station).position));
-  else camera.position.set(design.width*1.5,design.width*0.9,19);
-  if(mode==='section')camera.lookAt(transform(design,station).position);else if(mode==='inside')camera.lookAt(new THREE.Vector3(...alignment(design,-18)));else camera.lookAt(0,0,0);camera.updateProjectionMatrix();
- },[camera,mode,design.width,design.height,design.shape,mode==='section'?station:0,reset]);return null;
-}
-function Scene({design,layers,slice,simulation,highlightedLayerId,mode,ground,reset}:ThreeViewProps&{mode:string;ground:boolean;reset:number}) {
+function Scene({design,layers,slice,simulation,highlightedLayerId,mode,ground,reset,touring,reducedMotion,animate,onStop}:ThreeViewProps&{mode:string;ground:boolean;reset:number;touring:boolean;reducedMotion:boolean;animate:boolean;onStop:()=>void}) {
  const m=evaluateTunnel(design,layers,simulation), {height}=sectionDimensions(design);
  const end=-20+slice/100*40;
  const planes=useMemo(()=>{const f=transform(design,end),n=new THREE.Vector3(0,0,-1).applyQuaternion(f.quaternion);return mode==='inside'?[]:[new THREE.Plane().setFromNormalAndCoplanarPoint(n,f.position)];},[mode,end,design.horizontalRadius,design.verticalGrade]);
@@ -98,10 +91,15 @@ function Scene({design,layers,slice,simulation,highlightedLayerId,mode,ground,re
    </group>)}
    {showServices&&<group><mesh position={[design.width*.26,height*.24,0]} rotation={[Math.PI/2,0,0]}><cylinderGeometry args={[.065,.065,1.025,10]}/><meshStandardMaterial color="#926852" metalness={.35} roughness={.6}/></mesh>
    <mesh position={[-design.width*.28,height*.23,0]}><boxGeometry args={[.22,.07,1.025]}/><meshStandardMaterial color="#56656a" metalness={.7} roughness={.55}/></mesh>
+   {i%3===0&&<group><mesh position={[design.width*.26,height*.24,0]} rotation={[Math.PI/2,0,0]}><cylinderGeometry args={[.076,.076,.055,12,1,true]}/><meshStandardMaterial color="#a3a9a5" metalness={.8} roughness={.35} side={THREE.DoubleSide}/></mesh><mesh position={[design.width*.26,height*.24+.13,0]}><boxGeometry args={[.035,.2,.035]}/><meshStandardMaterial color="#748382" metalness={.6}/></mesh></group>}
+   {i%2===0&&<mesh position={[-design.width*.28,height*.23+.04,0]}><boxGeometry args={[.28,.035,.05]}/><meshStandardMaterial color="#9aa6a4" metalness={.7}/></mesh>}
    {i%4===0&&<mesh position={[-design.width*.28,height*.23-.12,0]}><boxGeometry args={[.05,.25,.04]}/><meshStandardMaterial color="#67757b" metalness={.6}/></mesh>}
    {i%12===0&&<group><mesh position={[floorWidth/2-.2,floor+1.35,0]} castShadow><boxGeometry args={[.28,.6,.18]}/><meshStandardMaterial color="#a44235" roughness={.5}/></mesh><mesh position={[-floorWidth/2+.22,floor+1.7,.1]}><planeGeometry args={[.42,.42]}/><meshStandardMaterial map={sign} emissiveMap={sign} emissive="#b6f8cc" emissiveIntensity={.65} side={THREE.DoubleSide}/></mesh></group>}
    </group>}
-   {i%4===0 && <group><mesh position={[0,height/2-design.wallThickness-0.16,0]}><boxGeometry args={[Math.min(1.2,design.width/4),0.08,0.6]}/><meshStandardMaterial color="#fff5dc" emissive="#fff1ce" emissiveIntensity={1.6}/></mesh><pointLight position={[0,height/2-design.wallThickness-0.4,0]} intensity={22} distance={9} decay={2}/></group>}
+   {i%4===0 && <group>
+    <mesh position={[0,height/2-design.wallThickness-.09,0]} castShadow><boxGeometry args={[Math.min(1.3,design.width/4+.1),.14,.7]}/><meshStandardMaterial color="#5e696b" metalness={.65} roughness={.4}/></mesh>
+    {[-1,1].map(side=><mesh key={side} position={[side*Math.min(.42,design.width/12),height/2-design.wallThickness-.17,0]}><boxGeometry args={[.025,.035,.62]}/><meshStandardMaterial color="#9caaa9" metalness={.7} roughness={.3}/></mesh>)}
+    <mesh position={[0,height/2-design.wallThickness-0.16,0]}><boxGeometry args={[Math.min(1.2,design.width/4),0.08,0.6]}/><meshStandardMaterial color="#fff5dc" emissive="#fff1ce" emissiveIntensity={1.2}/></mesh><pointLight position={[0,height/2-design.wallThickness-0.4,0]} intensity={18} distance={9} decay={2}/></group>}
   </group>)}
   {ground && layers.map(layer=>{const y=m.axisDepth-top-layer.thickness/2;top+=layer.thickness;return <mesh key={layer.id} position={[-design.width/2-4,y,0]}><boxGeometry args={[5,layer.thickness,40]}/><meshStandardMaterial color={layer.color} transparent opacity={highlightedLayerId===layer.id?0.85:0.35} roughness={1} depthWrite={false}/></mesh>;})}
   {ground && <gridHelper position={[0,m.axisDepth,0]} args={[60,30,'#526854','#35443c']}/>}
@@ -119,28 +117,42 @@ function Scene({design,layers,slice,simulation,highlightedLayerId,mode,ground,re
    return <arrowHelper key={i} args={[direction,point,len,0xffb657,0.15,0.09]}/>;
   })}</group>}
   {simulation.showSettlement && m.settlementMax!==null && <Line points={Array.from({length:101},(_,i):[number,number,number]=>{const x=(i-50)/50*3*m.troughWidth;return [x,m.axisDepth-(m.settlementAt(x)??0)*100,end-0.1];})} color="#f0b85c" lineWidth={3}/>}
-  <FitCamera mode={mode} design={design} station={end} reset={reset}/>
-  <OrbitControls key={`${mode}-${reset}`} makeDefault target={mode==='section'?transform(design,end).position:mode==='inside'?alignment(design,-18):[0,0,0]} minDistance={0.5} maxDistance={120}/>
+  <CameraRig mode={mode} design={design} station={end} reset={reset} touring={touring} reducedMotion={reducedMotion} animate={animate} onStop={onStop}/>
  </>;
 }
 export function ThreeView(props:ThreeViewProps) {
  const [mode,setMode]=useState('inside'),[ground,setGround]=useState(false),[reset,setReset]=useState(0);
+ const [touring,setTouring]=useState(false),[animate,setAnimate]=useState(true);
+ const [reducedMotion,setReducedMotion]=useState(()=>window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+ const stop=useCallback(()=>setTouring(false),[]);
+ useEffect(()=>{
+  const media=window.matchMedia('(prefers-reduced-motion: reduce)');
+  const update=()=>{setReducedMotion(media.matches);if(media.matches)stop();};
+  const visibility=()=>{if(document.hidden)stop();};
+  const escape=(e:KeyboardEvent)=>{if(e.key==='Escape')stop();};
+  media.addEventListener('change',update);document.addEventListener('visibilitychange',visibility);window.addEventListener('keydown',escape);
+  return()=>{media.removeEventListener('change',update);document.removeEventListener('visibilitychange',visibility);window.removeEventListener('keydown',escape);};
+ },[stop]);
+ useEffect(stop,[props.design,stop]);
  const {height}=sectionDimensions(props.design);
- return <div className="w-full h-full min-h-[400px] bg-slate-900 relative rounded-lg overflow-hidden">
-  <div className="absolute top-4 left-4 right-4 z-10 flex justify-between gap-2 flex-wrap">
-   <div className="bg-slate-950/80 rounded-lg p-1 flex gap-1">{['overview','section','inside'].map(v=><button key={v} onClick={()=>setMode(v)} aria-pressed={v===mode} className={`px-3 py-2 text-xs rounded capitalize ${v===mode?'bg-blue-600 text-white':'text-slate-300'}`}>{v}</button>)}</div>
-   <div className="flex gap-2"><button onClick={()=>setReset(v=>v+1)} className="text-xs text-white bg-slate-800/90 px-3 py-2 rounded-lg min-h-[40px]">Reset view</button><button onClick={()=>setGround(!ground)} aria-pressed={ground} className="text-xs text-white bg-slate-800/90 px-3 py-2 rounded-lg">{ground?'Hide':'Show'} geology</button></div>
+ const views=[{id:'overview',label:'Overview',icon:CubeIcon},{id:'section',label:'Section',icon:ScissorsIcon},{id:'inside',label:'Inside',icon:EyeIcon}];
+ return <div className="tunnel-view">
+  <div className="scene-toolbar">
+   <div className="view-switch" aria-label="Camera views">{views.map(v=><button key={v.id} onClick={e=>{stop();setAnimate(e.detail>0);setMode(v.id);}} aria-pressed={v.id===mode}><v.icon/>{v.label}</button>)}</div>
+   <div className="scene-actions"><button onClick={e=>{stop();setAnimate(e.detail>0);setReset(v=>v+1);}} title="Reset camera position" aria-label="Reset view"><ArrowPathIcon/></button><button onClick={()=>{stop();setGround(!ground);}} aria-pressed={ground}><Square3Stack3DIcon/><span>{ground?'Hide':'Show'} geology</span></button></div>
   </div>
-  <Canvas frameloop="demand" shadows dpr={[1,1.5]} camera={{fov:48,near:0.05,far:300}} gl={{antialias:true,localClippingEnabled:true}}><Scene {...props} mode={mode} ground={ground} reset={reset}/></Canvas>
-  <div className="absolute bottom-4 left-4 right-4 text-xs text-slate-300 pointer-events-none space-y-1 bg-slate-950/80 rounded-lg p-3">
-   <p className="text-white font-semibold">{props.design.method} · {props.design.shape} · {props.design.width.toFixed(1)} × {height.toFixed(1)} m outer section</p>
-   <p>40 m alignment · {Math.round(props.design.wallThickness*1000)} mm lining · {props.design.verticalGrade}% grade</p>
-   <p>Drag to orbit · scroll to zoom · fittings illustrate scale, not clearance compliance.</p>
+  <Canvas frameloop="demand" shadows dpr={[1,1.5]} camera={{fov:48,near:0.05,far:300}} gl={{antialias:true,localClippingEnabled:true}}><Scene {...props} mode={mode} ground={ground} reset={reset} touring={touring} reducedMotion={reducedMotion} animate={animate} onStop={stop}/></Canvas>
+  <div className="scene-bottom">
+   <div className="scene-caption"><div><strong>{props.design.method} · {props.design.shape}</strong><span>{props.design.width.toFixed(1)} × {height.toFixed(1)} m · {Math.round(props.design.wallThickness*1000)} mm lining</span></div>
+   <button className={`tour-button ${touring?'is-playing':''}`} disabled={reducedMotion} onClick={()=>{if(touring)stop();else{setMode('inside');setAnimate(true);setReset(v=>v+1);setTouring(true);}}} aria-pressed={touring}>{touring?<PauseIcon/>:<PlayIcon/>}{touring?'Pause walkthrough':'Walk through'}</button></div>
+   <p className="scene-help">{reducedMotion?'Reduced motion enabled · camera views change instantly.':touring?'Walking at 1.4 m/s · drag, scroll or press Esc to stop.':'Drag to orbit · scroll to zoom · explore a 40 m alignment.'}{reducedMotion&&<button className="enable-motion" onClick={()=>setReducedMotion(false)}>Enable motion for this preview</button>}</p>
+   <details className="scene-notes"><summary>Model information & overlays</summary><p>Fittings illustrate scale, not clearance compliance. {props.design.verticalGrade}% grade.</p>
    {props.simulation.showSettlement && <p className="text-amber-300">Gaussian settlement line · vertical displacement exaggerated ×100</p>}
    {props.simulation.showStress && <p className="text-amber-300">Far-field total stress traction · 1 m arrow / 200 kPa, capped at 3 m · not lining stress</p>}
    {props.simulation.showHydrostaticVectors && <p className="text-blue-300">Hydrostatic pressure · 1 m arrow / 100 kPa, capped at 3 m</p>}
    {props.simulation.showBMD && <p className="text-amber-300">Bending moment unavailable: requires a calibrated structural analysis.</p>}
    {props.simulation.showBorehole && ground && <p>Layer log shown beside alignment; ground surface is at the reference invert depth.</p>}
+   </details>
   </div>
  </div>;
 }

@@ -49,3 +49,38 @@ The browser checks cover rendering, invalid inputs, save/reload, export/reset, m
 - Method comparison still uses explicit illustrative assumptions, not local market prices or an engineering recommendation.
 - Saving is browser-local and origin-specific. Export JSON before changing browsers, devices or hosting origins. A JSON import UI is not currently provided.
 - The audit checks representative workflows and failure cases; it does not prove that every possible browser, GPU, input combination or accessibility requirement is satisfied.
+
+
+## Motion and realism follow-up — 20 October 2026
+
+| Before | After | Why |
+| --- | --- | --- |
+| Camera views snap between positions | Interruptible pointer transitions; immediate keyboard views | Preserve spatial orientation without slowing keyboard use |
+| No way to experience tunnel scale in motion | Opt-in walkthrough with Pause, Escape and direct-interaction stop | Show human-scale travel along the selected alignment |
+| Concrete stretched around segment walls | Circumferential/longitudinal UVs with smaller bump relief | Remove streaks from the curved lining |
+| Flat luminous rectangles and bare services | Light housings, bolt washers, pipe clamps, tray supports | Make construction details more legible |
+| Geometry only visible in the main viewport | Measured section preview driven by the shared profile | Confirm the chosen shape and lining while editing |
+| Overlay copy always occupies viewport | Expandable information below compact scene controls | Preserve useful viewing space on small screens |
+
+TypeScript, model/storage tests, production build and 14 Playwright workflows pass.
+Motion verification includes changing rendered canvas pixels during travel, a stable paused frame,
+Escape/direct interaction, dynamic reduced-motion preferences, and shared section/model dimensions.
+Screenshots cover 390, 768 and 1440 px. The Impeccable detector reports no findings.
+The large lazy-loaded Three.js chunk remains a build warning. Realistic fittings are illustrative;
+this update does not add structural solvers, clearance compliance or calibrated lighting analysis.
+
+
+## Dimensional UI follow-up
+
+| Before | After | Why |
+| --- | --- | --- |
+| Flat method icons | Five-layer section models with hover separation | Show section depth directly in the selector |
+| Abrupt navigation and panel swaps | Sliding indicators and interruptible panel transitions | Make changes easier to follow |
+| Flat control surfaces | Raised buttons/panels and recessed inputs | Make interaction depth visible |
+| Reduced motion only at OS level | Explicit Interface motion control, defaulting to OS preference | User can choose UI motion within this session |
+| Tablet header overflows after adding motion control | Navigation wraps below brand/actions at tablet widths | Keep every control reachable |
+| Page tilt briefly widens the mobile document | Tilt recedes from the top edge | Keep transitions within the viewport |
+
+Verification: production build, TypeScript and 15 browser workflows, including the interface motion
+toggle, with screenshots at 390, 768 and 1440 px. The detector flagged the superseded 3 px navigation
+underline declaration; it was removed because the current navigation uses a sliding raised surface.

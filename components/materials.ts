@@ -17,8 +17,8 @@ export function surfaceTexture(kind: 'concrete' | 'asphalt' | 'sign') {
     let seed = 1997;
     for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
       seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
-      const grain = seed % 32 - 16;
-      const cloud = Math.sin(x / 47) * Math.cos(y / 81) * 4 + Math.sin(y / 13) * 1.2;
+      const grain = seed % 18 - 9;
+      const cloud = Math.sin(x / 47) * Math.cos(y / 81) * 7 + Math.sin((x+y) / 97) * 4;
       const v = (kind === 'concrete' ? 173 : 57) + grain + cloud, i = (y * size + x) * 4;
       img.data[i] = v; img.data[i + 1] = v + (kind === 'concrete' ? 1 : 3);
       img.data[i + 2] = v + (kind === 'concrete' ? -3 : 4); img.data[i + 3] = 255;
@@ -41,7 +41,7 @@ export function surfaceTexture(kind: 'concrete' | 'asphalt' | 'sign') {
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
   texture.anisotropy = 4;
-  texture.repeat.set(kind === 'sign' ? 1 : .65, kind === 'sign' ? 1 : .65);
+  texture.repeat.set(kind === 'sign' ? 1 : 1.2, kind === 'sign' ? 1 : 1.2);
   return texture;
 }
 
@@ -53,3 +53,21 @@ export function segmentShape(radius: number, thickness: number, count: number) {
   shape.closePath();
   return shape;
 }
+
+// Map segment walls in metres around the circumference and along the alignment.
+// ExtrudeGeometry's default projection stretches the concrete near the springline.
+export const segmentUV = {
+ generateTopUV(_geometry:THREE.ExtrudeGeometry,vertices:number[],a:number,b:number,c:number) {
+  return [a,b,c].map(i=>new THREE.Vector2(vertices[i*3],vertices[i*3+1]));
+ },
+ generateSideWallUV(_geometry:THREE.ExtrudeGeometry,vertices:number[],a:number,b:number,c:number,d:number) {
+  const base=Math.atan2(vertices[a*3+1],vertices[a*3]);
+  return [a,b,c,d].map(i=>{
+   const x=vertices[i*3],y=vertices[i*3+1];
+   let angle=Math.atan2(y,x);
+   while(angle-base>Math.PI)angle-=2*Math.PI;
+   while(angle-base<-Math.PI)angle+=2*Math.PI;
+   return new THREE.Vector2(angle*Math.hypot(x,y),vertices[i*3+2]);
+  });
+ }
+};
