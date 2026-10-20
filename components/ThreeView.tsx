@@ -1,933 +1,146 @@
-import React, { useRef, useMemo, useState, useEffect } from 'react';
-import { Canvas, useFrame } from '@react-three/fiber';
-import { OrbitControls, Environment, Html, Line, Cylinder } from '@react-three/drei';
+import React, { useMemo, useEffect, useState } from 'react';
+import { Canvas, useThree } from '@react-three/fiber';
+import { OrbitControls, Line } from '@react-three/drei';
 import * as THREE from 'three';
-import { TunnelDesign, GeologicalLayer, TunnelShape, ConstructionMethod, SimulationSettings, GeoMaterial } from '../types';
-import { EyeIcon, EyeSlashIcon, ViewfinderCircleIcon, BeakerIcon, ArrowDownIcon } from '@heroicons/react/24/outline';
+import { surfaceTexture, segmentShape } from './materials';
+import { TunnelShape, ConstructionMethod, type TunnelDesign, type GeologicalLayer, type SimulationSettings } from '../types';
+import { alignment, evaluateTunnel, profile, sectionDimensions, MODEL_LENGTH } from '../services/engineering';
+interface ThreeViewProps {design:TunnelDesign;layers:GeologicalLayer[];slice:number;simulation:SimulationSettings;highlightedLayerId?:string|null;}
 
-interface ThreeViewProps {
-  design: TunnelDesign;
-  layers: GeologicalLayer[];
-  slice: number;
-  simulation: SimulationSettings;
-  highlightedLayerId?: string | null;
+function sectionShape(d:TunnelDesign) {
+ const outer = profile(d), inner = profile(d,d.wallThickness);
+ const shape = new THREE.Shape(outer.map(p=>new THREE.Vector2(...p)));
+ shape.closePath();
+ const hole = new THREE.Path(inner.slice().reverse().map(p=>new THREE.Vector2(...p)));
+ hole.closePath(); shape.holes.push(hole); return shape;
 }
-
-// --- Procedural Texture Generation (Geological Patterns) ---
-const generateGeoTexture = (type: GeoMaterial, colorStr: string): THREE.CanvasTexture => {
-    const size = 512; // Higher resolution for better detail
-    const canvas = document.createElement('canvas');
-    canvas.width = size; canvas.height = size;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return new THREE.CanvasTexture(canvas);
-
-    // Background
-    ctx.fillStyle = colorStr;
-    ctx.fillRect(0, 0, size, size);
-
-    // Base Noise / Texture
-    ctx.fillStyle = 'rgba(0,0,0,0.05)';
-    for(let i=0; i<2000; i++) {
-        ctx.fillRect(Math.random()*size, Math.random()*size, 2, 2);
-    }
-
-    // Pattern Style
-    ctx.strokeStyle = 'rgba(0,0,0,0.15)';
-    ctx.lineWidth = 2;
-
-    switch(type) {
-        case GeoMaterial.Sand:
-            // Stipple / Dots
-            ctx.fillStyle = 'rgba(0,0,0,0.15)';
-            for(let i=0; i<1500; i++) {
-                ctx.beginPath();
-                const x = Math.random() * size;
-                const y = Math.random() * size;
-                ctx.arc(x, y, 1.5, 0, Math.PI*2);
-                ctx.fill();
-            }
-            break;
-        case GeoMaterial.SoftClay:
-        case GeoMaterial.StiffClay:
-            // Bedding Planes (Horizontal lines)
-            ctx.lineWidth = 3;
-            ctx.strokeStyle = 'rgba(0,0,0,0.1)';
-            for(let y=0; y<size; y+=40) {
-                 // Wobbly lines
-                 ctx.beginPath();
-                 ctx.moveTo(0, y);
-                 for(let x=0; x<=size; x+=20) {
-                     ctx.lineTo(x, y + Math.sin(x*0.05)*5);
-                 }
-                 ctx.stroke();
-            }
-            break;
-        case GeoMaterial.Gravel:
-            // Circles/Stones
-            ctx.strokeStyle = 'rgba(0,0,0,0.2)';
-            for(let i=0; i<200; i++) {
-                ctx.beginPath();
-                const r = 4 + Math.random() * 8;
-                ctx.arc(Math.random()*size, Math.random()*size, r, 0, Math.PI*2);
-                ctx.stroke();
-            }
-            break;
-        case GeoMaterial.WeatheredRock:
-            // Fractured pattern
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            for(let i=0; i<50; i++) {
-                const x = Math.random() * size;
-                const y = Math.random() * size;
-                ctx.moveTo(x, y);
-                ctx.lineTo(x + (Math.random()-0.5)*100, y + (Math.random()-0.5)*100);
-            }
-            ctx.stroke();
-            break;
-        case GeoMaterial.SoundRock:
-        case GeoMaterial.Granite:
-            // Cross hatching / Blocky
-            ctx.lineWidth = 3;
-            const space = 60;
-            ctx.beginPath();
-            for(let i=-size; i<size*2; i+=space) {
-                 ctx.moveTo(i, 0); ctx.lineTo(i+size, size); // Diagonal 1
-            }
-            if (type === GeoMaterial.Granite) {
-                 // Granite has orthogonal joints often, or speckles. Let's add speckles on top.
-                 ctx.fillStyle = 'rgba(255,255,255,0.15)';
-                 for(let i=0; i<500; i++) {
-                     ctx.fillRect(Math.random()*size, Math.random()*size, 4, 4);
-                 }
-            } else {
-                 // Sound Rock - second diagonal
-                 for(let i=-size; i<size*2; i+=space) {
-                     ctx.moveTo(i, size); ctx.lineTo(i+size, 0); 
-                 }
-            }
-            ctx.stroke();
-            break;
-    }
-    const tex = new THREE.CanvasTexture(canvas);
-    tex.wrapS = THREE.RepeatWrapping;
-    tex.wrapT = THREE.RepeatWrapping;
-    // Anisotropy for sharper angles
-    tex.anisotropy = 4;
-    return tex;
-};
-
-// --- Inspector Tooltip Component ---
-const Inspector: React.FC<{ data: any | null, clear: () => void }> = ({ data, clear }) => {
-  if (!data || !data.props) return null;
-  return (
-    <Html position={data.point}>
-      <div className="bg-slate-900/90 text-white p-3 rounded-lg text-xs w-48 backdrop-blur-md border border-slate-600 shadow-xl pointer-events-none select-none z-50 animate-in fade-in zoom-in duration-200">
-        <div className="flex justify-between items-center mb-2 border-b border-slate-600 pb-1 pointer-events-auto">
-          <span className="font-bold text-blue-300">{data.title}</span>
-          <button onClick={(e) => { e.stopPropagation(); clear(); }} className="text-slate-400 hover:text-white px-1">×</button>
-        </div>
-        <div className="space-y-1">
-          {Object.entries(data.props).map(([k, v]) => (
-            <div key={k} className="flex justify-between">
-              <span className="text-slate-400 capitalize">{k}:</span>
-              <span>{v as string}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    </Html>
-  );
-};
-
-// --- Borehole Log Panel (Overlay) ---
-const BoreholeLog: React.FC<{ layers: GeologicalLayer[], depth: number }> = ({ layers, depth }) => {
-    return (
-        <div className="bg-white/95 backdrop-blur-sm p-4 rounded-lg shadow-xl border border-slate-300 w-48 text-xs font-mono select-none">
-            <div className="font-bold text-slate-800 border-b border-slate-300 pb-2 mb-2 flex justify-between">
-                <span>BH-01</span>
-                <span className="text-slate-500">Log</span>
-            </div>
-            
-            <div className="flex text-[10px] text-slate-500 mb-1 border-b border-slate-200 pb-1">
-                <div className="w-8">Dpth</div>
-                <div className="w-16">Lithology</div>
-                <div className="flex-1 text-right">N/RQD</div>
-            </div>
-
-            <div className="space-y-1 relative">
-                {/* Scale Lines */}
-                <div className="absolute left-6 top-0 bottom-0 w-px bg-slate-200"></div>
-
-                {layers.map((layer, i) => {
-                    // Approximate depth accumulation for visualization
-                    let depthAcc = 0;
-                    for(let j=0; j<i; j++) depthAcc += layers[j].thickness;
-                    
-                    return (
-                        <div key={layer.id} className="relative py-2 border-b border-slate-100 last:border-0 group">
-                            <div className="flex items-start">
-                                <div className="w-8 text-slate-400">-{depthAcc}m</div>
-                                <div className="w-16 font-bold text-slate-700 truncate" title={layer.type}>{layer.type}</div>
-                                <div className="flex-1 text-right flex flex-col items-end">
-                                    {layer.spt_n && <span className="text-blue-600 font-bold">N={layer.spt_n}</span>}
-                                    {layer.rqd && <span className="text-emerald-600 font-bold">RQD:{layer.rqd}%</span>}
-                                    {!layer.spt_n && !layer.rqd && <span className="text-slate-300">-</span>}
-                                </div>
-                            </div>
-                            {/* Graphic Pattern Strip */}
-                            <div className="h-1 w-full mt-1 opacity-50" style={{ backgroundColor: layer.color }}></div>
-                        </div>
-                    );
-                })}
-            </div>
-        </div>
-    );
-};
-
-// --- Advanced Metrics Panel (Calculations) ---
-const AdvancedMetricsPanel: React.FC<{ layers: GeologicalLayer[], design: TunnelDesign, waterLevel: number }> = ({ layers, design, waterLevel }) => {
-    // 1. Determine active layer at tunnel depth
-    let currentDepth = 0;
-    let activeLayer: GeologicalLayer | null = null;
-    for(const l of layers) {
-        if(currentDepth + l.thickness >= design.depth) {
-            activeLayer = l;
-            break;
-        }
-        currentDepth += l.thickness;
-    }
-
-    if (!activeLayer) return null;
-
-    // 2. Calculations
-    const overburden = design.depth * activeLayer.density; // kPa
-    const supportPressure = (overburden * 0.4).toFixed(0); // Simplified K0 assumption
+function transform(d:TunnelDesign,s:number) {
+ const p = new THREE.Vector3(...alignment(d,s));
+ const tangent = new THREE.Vector3().subVectors(new THREE.Vector3(...alignment(d,s+0.01)),p).normalize();
+ return {position:p,quaternion:new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,0,1),tangent)};
+}
+function boundarySamples(d:TunnelDesign) {
+ const p=profile(d), samples:{x:number;y:number;nx:number;ny:number}[]=[];
+ for(let i=0;i<p.length;i++){
+  const a=p[i],b=p[(i+1)%p.length],dx=b[0]-a[0],dy=b[1]-a[1],length=Math.hypot(dx,dy);
+  const count=p.length<=4?5:1;if(p.length>4 && i%4!==0)continue;
+  for(let j=0;j<count;j++)samples.push({x:a[0]+dx*(j+0.5)/count,y:a[1]+dy*(j+0.5)/count,nx:dy/length,ny:-dx/length});
+ }
+ return samples;
+}
+const Lining=React.memo(function Lining({design}:{design:TunnelDesign}) {
+ const interval=design.method===ConstructionMethod.TBM?design.ringWidth:design.method===ConstructionMethod.NATM?design.boltSpacing:5;
+ const shape=useMemo(()=>sectionShape(design),[design.shape,design.width,design.height,design.wallThickness]);
+ const texture=useMemo(()=>surfaceTexture('concrete'),[]); useEffect(()=>()=>texture.dispose(),[texture]);
+ const {height}=sectionDimensions(design);
+ const segment=useMemo(()=>segmentShape(design.width/2-.004,design.wallThickness-.008,design.segmentCount),[design.width,design.wallThickness,design.segmentCount]);
+ const rings=Array.from({length:Math.ceil(MODEL_LENGTH/interval)},(_,i)=>{
+  const start=-20+i*interval, length=Math.min(interval,20-start);
+  return {start,length,...transform(design,start)};
+ });
+ return <group>{rings.map((r,i)=><group key={i} position={r.position} quaternion={r.quaternion}>
+  {design.method===ConstructionMethod.TBM && design.shape===TunnelShape.Circular ? Array.from({length:design.segmentCount},(_,j)=><mesh key={`segment-${j}`} rotation={[0,0,2*Math.PI*(j+(i%2)*.5)/design.segmentCount]} castShadow receiveShadow>
+   <extrudeGeometry args={[segment,{depth:Math.max(.01,r.length-.012),bevelEnabled:true,bevelThickness:.004,bevelSize:.004,bevelSegments:1,steps:1,curveSegments:24}]}/>
+   <meshStandardMaterial map={texture} bumpMap={texture} bumpScale={.014} color={j%3===0?'#c1c0b7':'#d5d3ca'} roughness={.92}/>
+  </mesh>):<mesh castShadow receiveShadow><extrudeGeometry args={[shape,{depth:Math.max(.01,r.length-.012),bevelEnabled:false,steps:1,curveSegments:48}]}/><meshStandardMaterial map={texture} bumpMap={texture} bumpScale={design.method===ConstructionMethod.NATM?.05:.014} color="#babbb2" roughness={.96}/></mesh>}
+  {design.method===ConstructionMethod.TBM && design.shape===TunnelShape.Circular && Array.from({length:design.segmentCount},(_,j)=>{
+   const angle=2*Math.PI*(j+(i%2)*0.5)/design.segmentCount;
+   const radius=design.width/2-design.wallThickness-0.008;
+   return <group key={j}>
     
-    // Stand-up Time Logic
-    let standUpTime = "N/A";
-    let thiScore = 0; // Tunnel Hazard Index
-
-    if (activeLayer.type === GeoMaterial.SoundRock || activeLayer.type === GeoMaterial.Granite) {
-        standUpTime = "> 1 Year";
-        thiScore += 1;
-    } else if (activeLayer.type === GeoMaterial.StiffClay || activeLayer.type === GeoMaterial.WeatheredRock) {
-        standUpTime = "10-24 Hours";
-        thiScore += 4;
-    } else {
-        standUpTime = "< 30 Mins";
-        thiScore += 8;
-    }
-
-    // Water penalty
-    const isUnderWater = waterLevel > 0;
-    if (isUnderWater) thiScore += activeLayer.permeability === 'High' ? 2 : 1;
-
-    // THI Color
-    const thiColor = thiScore > 7 ? 'text-red-500' : thiScore > 3 ? 'text-yellow-600' : 'text-green-500';
-
-    return (
-        <div className="bg-slate-900/90 backdrop-blur-md p-3 rounded-lg border border-slate-700 w-48 text-xs text-slate-300 space-y-3 shadow-xl">
-             <div className="border-b border-slate-700 pb-1 font-bold text-white flex gap-2">
-                <BeakerIcon className="w-4 h-4 text-purple-400" /> Engineer's Log
-             </div>
-             <div>
-                <span className="block text-[10px] uppercase tracking-wider text-slate-500">Est. Stand-up Time</span>
-                <span className="font-mono text-white text-sm">{standUpTime}</span>
-             </div>
-             <div>
-                <span className="block text-[10px] uppercase tracking-wider text-slate-500">Support Pressure (Pi)</span>
-                <span className="font-mono text-white text-sm">{supportPressure} kPa</span>
-             </div>
-             <div>
-                <span className="block text-[10px] uppercase tracking-wider text-slate-500">Tunnel Hazard Index</span>
-                <div className="flex items-end gap-1">
-                    <span className={`font-mono text-xl font-bold ${thiColor}`}>{Math.min(10, thiScore)}</span>
-                    <span className="text-[10px] mb-1">/ 10</span>
-                </div>
-                <div className="w-full h-1 bg-slate-700 mt-1 rounded-full overflow-hidden">
-                    <div className={`h-full ${thiScore > 7 ? 'bg-red-500' : thiScore > 3 ? 'bg-yellow-500' : 'bg-green-500'}`} style={{width: `${Math.min(100, thiScore*10)}%`}}></div>
-                </div>
-             </div>
-        </div>
-    );
-};
-
-// --- Water Ingress System ---
-const WaterIngressSystem: React.FC<{ design: TunnelDesign, waterLevel: number, clipPlane: THREE.Plane }> = ({ design, waterLevel, clipPlane }) => {
-  const count = 300;
-  const meshRef = useRef<THREE.InstancedMesh>(null);
-  const dummy = useMemo(() => new THREE.Object3D(), []);
-  const particles = useMemo(() => {
-    return new Array(count).fill(0).map(() => ({
-      position: new THREE.Vector3(
-        (Math.random() - 0.5) * design.width * 0.8,
-        (Math.random()) * design.height/2, 
-        (Math.random() - 0.5) * 40
-      ),
-      speed: 0.05 + Math.random() * 0.1
-    }));
-  }, [count, design]);
-
-  useFrame(() => {
-    if (!meshRef.current) return;
-    if (waterLevel <= 0) {
-        meshRef.current.visible = false;
-        return;
-    }
-    meshRef.current.visible = true;
-
-    particles.forEach((particle, i) => {
-      particle.position.y -= particle.speed;
-      if (particle.position.y < -design.height/2) {
-        particle.position.y = design.height/2;
-        particle.position.x = (Math.random() - 0.5) * design.width * 0.8;
-      }
-      dummy.position.copy(particle.position);
-      dummy.scale.setScalar(0.05);
-      dummy.updateMatrix();
-      meshRef.current!.setMatrixAt(i, dummy.matrix);
-    });
-    meshRef.current.instanceMatrix.needsUpdate = true;
-  });
-
-  return (
-    <instancedMesh ref={meshRef} args={[undefined, undefined, count]}>
-      <sphereGeometry args={[1, 8, 8]} />
-      <meshBasicMaterial color="#60a5fa" transparent opacity={0.6} clippingPlanes={[clipPlane]} />
-    </instancedMesh>
-  );
-};
-
-// --- Stress Halo ---
-const StressHalo: React.FC<{ design: TunnelDesign, sliceZ: number, clipPlane: THREE.Plane }> = ({ design, sliceZ, clipPlane }) => {
-    const radius = (design.width / 2) + 0.5;
-    const geometry = useMemo(() => {
-        const geo = new THREE.RingGeometry(radius, radius + 2, 64);
-        const colors = [];
-        const pos = geo.attributes.position;
-        const color = new THREE.Color();
-        for (let i = 0; i < pos.count; i++) {
-            const x = pos.getX(i);
-            const y = pos.getY(i);
-            const angle = Math.atan2(y, x);
-            const normalizedAngle = Math.abs(Math.cos(angle));
-            color.setHSL(0.6 - (normalizedAngle * 0.6), 1.0, 0.5); 
-            colors.push(color.r, color.g, color.b);
-        }
-        geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-        return geo;
-    }, [radius]);
-
-    return (
-        <mesh position={[0, 0, sliceZ]} geometry={geometry}>
-            <meshBasicMaterial vertexColors side={THREE.DoubleSide} transparent opacity={0.5} depthWrite={false} clippingPlanes={[clipPlane]} />
-        </mesh>
-    );
-};
-
-// --- Bending Moment Diagram (BMD) ---
-const BendingMomentDiagram: React.FC<{ design: TunnelDesign, sliceZ: number }> = ({ design, sliceZ }) => {
-    // Generate texture dynamically
-    const texture = useMemo(() => {
-        const size = 1024;
-        const canvas = document.createElement('canvas');
-        canvas.width = size;
-        canvas.height = size;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return new THREE.CanvasTexture(canvas);
-
-        const cx = size / 2;
-        const cy = size / 2;
-        const radius = (size / 3); 
-        const momentScale = 80; // Scale factor for visual
-
-        ctx.clearRect(0,0,size,size);
-        
-        // Draw Tunnel Outline
-        ctx.strokeStyle = '#94a3b8';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-        ctx.stroke();
-
-        // Draw Moment Diagram
-        // M = M_max * cos(2*theta)
-        ctx.strokeStyle = '#ef4444'; // Red
-        ctx.lineWidth = 6;
-        ctx.beginPath();
-        for (let i = 0; i <= 360; i++) {
-            const theta = (i * Math.PI) / 180;
-            const moment = Math.cos(2 * theta); // -1 to 1
-            const r = radius + (moment * momentScale);
-            const x = cx + r * Math.cos(theta);
-            const y = cy + r * Math.sin(theta);
-            if (i === 0) ctx.moveTo(x, y);
-            else ctx.lineTo(x, y);
-        }
-        ctx.closePath();
-        ctx.stroke();
-
-        // Labels
-        ctx.font = 'bold 32px JetBrains Mono';
-        ctx.fillStyle = '#ef4444';
-        ctx.fillText("M(+)", cx + radius + momentScale, cy);
-        ctx.fillText("M(-)", cx, cy - radius + momentScale);
-
-        return new THREE.CanvasTexture(canvas);
-    }, [design.width]);
-
-    return (
-        <mesh position={[0, 0, sliceZ + 0.05]} rotation={[0, 0, 0]}>
-            <planeGeometry args={[design.width * 2.5, design.width * 2.5]} />
-            <meshBasicMaterial map={texture} transparent opacity={0.9} side={THREE.DoubleSide} depthWrite={false} />
-        </mesh>
-    );
-};
-
-// --- Surface Settlement Frustum ---
-const SettlementVolume: React.FC<{ design: TunnelDesign, sliceZ: number }> = ({ design, sliceZ }) => {
-    // Width at surface is usually depth * factor + diameter
-    const troughWidth = design.width + (design.depth * 0.8); 
-    const depth = design.depth;
-    
-    // Custom Shader for Gradient Fade
-    const material = useMemo(() => new THREE.ShaderMaterial({
-        uniforms: {
-            colorBottom: { value: new THREE.Color(1, 0, 0) }, // Red at tunnel
-            colorTop: { value: new THREE.Color(1, 1, 0) }, // Yellow at surface
-        },
-        vertexShader: `
-            varying vec2 vUv;
-            void main() {
-                vUv = uv;
-                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-            }
-        `,
-        fragmentShader: `
-            uniform vec3 colorBottom;
-            uniform vec3 colorTop;
-            varying vec2 vUv;
-            void main() {
-                // vUv.y goes from 0 (bottom) to 1 (top)
-                float opacity = 0.5 - (vUv.y * 0.5); // Fade out as it goes up
-                vec3 finalColor = mix(colorBottom, colorTop, vUv.y);
-                gl_FragColor = vec4(finalColor, opacity);
-            }
-        `,
-        transparent: true,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-    }), []);
-
-    return (
-        <mesh position={[0, depth / 2, sliceZ]} rotation={[0, 0, 0]}>
-             {/* Frustum: Top Radius, Bottom Radius, Height */}
-            <cylinderGeometry args={[troughWidth / 2, design.width / 2, depth, 32, 1, true]} />
-            <primitive object={material} />
-        </mesh>
-    );
-};
-
-// --- Hydrostatic Vector Field ---
-const HydrostaticVectors: React.FC<{ design: TunnelDesign, waterLevel: number, curve: THREE.Curve<THREE.Vector3> }> = ({ design, waterLevel, curve }) => {
-    const meshRef = useRef<THREE.InstancedMesh>(null);
-    const count = 100; // Total vectors
-    const dummy = useMemo(() => new THREE.Object3D(), []);
-    const radius = design.width / 2;
-
-    // Generate instances
-    useFrame(() => {
-        if (!meshRef.current) return;
-        
-        let idx = 0;
-        const rings = 10;
-        const vectorsPerRing = 10;
-        const length = 40;
-
-        for (let i = 0; i < rings; i++) {
-            const t = i / (rings - 1);
-            const point = curve.getPointAt(t);
-            const tangent = curve.getTangentAt(t);
-            const normal = new THREE.Vector3(0, 1, 0).applyAxisAngle(new THREE.Vector3(0, 0, 1), 0); // Base Up
-            // Simplified Frenet for vertical:
-            const binormal = new THREE.Vector3().crossVectors(tangent, normal).normalize();
-            const realNormal = new THREE.Vector3().crossVectors(binormal, tangent).normalize();
-
-            for (let j = 0; j < vectorsPerRing; j++) {
-                 const angle = (j / vectorsPerRing) * Math.PI * 2;
-                 // Position on circle surface
-                 const localPos = new THREE.Vector3(Math.cos(angle) * radius, Math.sin(angle) * radius, 0);
-                 
-                 // Apply rotation to match curve tangent?
-                 // Simple approximation: Just offset from point
-                 const worldPos = point.clone().add(localPos); // Warning: this doesn't rotate ring with tangent
-                 
-                 // Calculate Depth below GWT
-                 const depth = waterLevel - worldPos.y;
-                 
-                 if (depth > 0) {
-                     dummy.position.copy(worldPos);
-                     dummy.lookAt(point); // Point inward
-                     const scale = Math.min(2.0, depth * 0.1); // Scale vector length by pressure
-                     dummy.scale.set(1, 1, scale * 3); // Make arrow long
-                     dummy.updateMatrix();
-                     meshRef.current.setMatrixAt(idx++, dummy.matrix);
-                 } else {
-                     // Hide if above water
-                     dummy.scale.set(0,0,0);
-                     dummy.updateMatrix();
-                     meshRef.current.setMatrixAt(idx++, dummy.matrix);
-                 }
-            }
-        }
-        meshRef.current.instanceMatrix.needsUpdate = true;
-    });
-
-    return (
-        <instancedMesh ref={meshRef} args={[undefined, undefined, count]}>
-            <cylinderGeometry args={[0.05, 0.05, 1]} /> {/* Arrow Shaft */}
-            <meshStandardMaterial color="#3b82f6" />
-        </instancedMesh>
-    )
-};
-
-
-// --- Alignment Deviation ---
-const AlignmentSystem: React.FC<{ curve: THREE.Curve<THREE.Vector3>, clipPlane: THREE.Plane }> = ({ curve, clipPlane }) => {
-    const tubeGeo = useMemo(() => new THREE.TubeGeometry(curve, 64, 0.05, 8, false), [curve]);
-    return (
-        <group>
-            <mesh geometry={tubeGeo}>
-                <meshStandardMaterial color="lime" clippingPlanes={[clipPlane]} />
-            </mesh>
-        </group>
-    );
-};
-
-// --- Grouting Fan ---
-const GroutingFan: React.FC<{ radius: number, clipPlane: THREE.Plane }> = ({ radius, clipPlane }) => {
-    const piles = 12;
-    const length = 8;
-    return (
-        <group position={[0, 0, -5]}>
-            {new Array(piles).fill(0).map((_, i) => {
-                const angle = (i / piles) * Math.PI;
-                return (
-                    <mesh key={i} rotation={[0, 0, angle]}>
-                        <group rotation={[Math.PI/12, 0, 0]}> 
-                            <mesh position={[0, length/2, 0]}>
-                                <cylinderGeometry args={[0.05, 0.05, length]} />
-                                <meshStandardMaterial color="#fbbf24" transparent opacity={0.7} clippingPlanes={[clipPlane]} />
-                            </mesh>
-                        </group>
-                    </mesh>
-                )
-            })}
-        </group>
-    );
-};
-
-// --- Segmented Lining (Detailed TBM) ---
-const SegmentedLining: React.FC<{ design: TunnelDesign, clipPlane: THREE.Plane, onClick: (e: any, props: any) => void, curve: THREE.Curve<THREE.Vector3> }> = ({ design, clipPlane, onClick, curve }) => {
-  const segmentCount = design.segmentCount || 6;
-  const ringWidth = design.ringWidth || 1.5;
-  const tunnelLength = 40;
-  const numRings = Math.ceil(tunnelLength / ringWidth);
-  const outerRadius = design.width / 2;
-  const innerRadius = outerRadius - design.wallThickness;
-  
-  // Calculate Angles
-  const keyAngle = (20 * Math.PI) / 180; // 20 degrees for Key
-  const regularAngle = (2 * Math.PI - keyAngle) / segmentCount;
-  const gap = 0.02; // Gap between segments for visual distinction
-
-  // Geometries for instancing
-  const regularGeo = useMemo(() => new THREE.CylinderGeometry(outerRadius, outerRadius, ringWidth - 0.05, 32, 1, true, gap/2, regularAngle - gap), [outerRadius, ringWidth, regularAngle]);
-  const keyGeo = useMemo(() => new THREE.CylinderGeometry(outerRadius, outerRadius, ringWidth - 0.05, 16, 1, true, gap/2, keyAngle - gap), [outerRadius, ringWidth, keyAngle]);
-  
-  return (
-    <group>
-        {new Array(numRings).fill(0).map((_, rIndex) => {
-             // Position along curve
-             const t = rIndex / (numRings - 1);
-             const pos = curve.getPointAt(t);
-             const tangent = curve.getTangentAt(t);
-             
-             // Stagger rotation every other ring
-             const rotationOffset = rIndex % 2 === 0 ? 0 : regularAngle / 2;
-             
-             return (
-                 <group key={rIndex} position={pos} lookAt={pos.clone().add(tangent)}>
-                     {/* Manually rotate 90 deg because lookAt aligns +Z, but Cylinder is +Y aligned default, wait... we rotate group, then children? */}
-                     {/* Correct: The group looks down the curve tangent. We need to rotate the children to align the cylinder axis with Z */}
-                     <group rotation={[Math.PI/2, 0, rotationOffset]}>
-                         {/* Regular Segments */}
-                         {new Array(segmentCount).fill(0).map((_, sIndex) => (
-                             <mesh 
-                                key={`reg-${sIndex}`} 
-                                geometry={regularGeo} 
-                                rotation={[0, sIndex * regularAngle, 0]}
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    onClick(e, { title: 'TBM Segment', props: { type: 'Standard', id: `R${rIndex}-S${sIndex+1}` }});
-                                }}
-                            >
-                                 <meshStandardMaterial color="#d4d4d8" roughness={0.6} side={THREE.DoubleSide} clippingPlanes={[clipPlane]} />
-                             </mesh>
-                         ))}
-                         {/* Key Segment */}
-                         <mesh 
-                            geometry={keyGeo} 
-                            rotation={[0, segmentCount * regularAngle, 0]}
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                onClick(e, { title: 'Key Segment', props: { type: 'Wedge-K', id: `R${rIndex}-K` }});
-                            }}
-                         >
-                             <meshStandardMaterial color="#cbd5e1" roughness={0.5} side={THREE.DoubleSide} clippingPlanes={[clipPlane]} />
-                         </mesh>
-                     </group>
-                 </group>
-             )
-        })}
-    </group>
-  );
-};
-
-// --- NATM Support (Detailed & Parametric) ---
-const NATMSupport: React.FC<{ design: TunnelDesign, stage: number, clipPlane: THREE.Plane, onClick: (e: any, props: any) => void, curve: THREE.Curve<THREE.Vector3> }> = ({ design, stage, clipPlane, onClick, curve }) => {
-  const outerRadius = design.width / 2;
-  // We use TubeGeometry for the shotcrete shell to follow the curve smoothly
-  const shotcreteGeo = useMemo(() => new THREE.TubeGeometry(curve, 64, outerRadius, 32, false), [curve, outerRadius]);
-
-  const length = 40;
-  
-  // Rock Bolts System - Updated to follow curve
-  const bolts = useMemo(() => {
-      const items = [];
-      const boltSpacing = design.boltSpacing || 1.5;
-      const boltLen = design.boltLength || 3;
-      
-      const numRings = Math.floor(length / boltSpacing);
-      const boltsPerRing = 7; // Radial count
-      
-      for(let i=0; i<numRings; i++) {
-          const t = i / (numRings - 1);
-          const pos = curve.getPointAt(t);
-          const tangent = curve.getTangentAt(t);
-          // Frenet Frame
-          const normal = new THREE.Vector3(0, 1, 0).applyAxisAngle(new THREE.Vector3(1,0,0), 0);
-          const binormal = new THREE.Vector3().crossVectors(tangent, normal).normalize();
-          const up = new THREE.Vector3().crossVectors(binormal, tangent).normalize();
-
-          for(let j=0; j<boltsPerRing; j++) {
-              const angle = (j / (boltsPerRing-1)) * Math.PI; // spread over top 180
-              // Calculate radial direction in the plane perpendicular to tangent
-              const radialDir = new THREE.Vector3()
-                  .addScaledVector(binormal, Math.cos(angle))
-                  .addScaledVector(up, Math.sin(angle))
-                  .normalize();
-              
-              // Rotation quaternion to align bolt (Y-up cylinder) with radialDir
-              const quaternion = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0), radialDir);
-              
-              items.push({ pos: pos, quat: quaternion, len: boltLen }); 
-          }
-      }
-      return items;
-  }, [length, design.boltSpacing, design.boltLength, curve]);
-
-  return (
-    <group>
-        {/* Shotcrete Shell */}
-        {stage >= 1 && (
-            <mesh 
-                geometry={shotcreteGeo} 
-                onClick={(e) => {
-                    e.stopPropagation();
-                    onClick(e, { title: 'Top Heading SCL', props: { material: 'Shotcrete', thickness: `${design.wallThickness*1000}mm`, age: '3 days' }});
-                }}
-            >
-                <meshStandardMaterial color="#a1a1aa" roughness={0.9} side={THREE.DoubleSide} clippingPlanes={[clipPlane]} />
-            </mesh>
-        )}
-        
-        {/* Steel Mesh (Wireframe Overlay) */}
-        {stage >= 1 && (
-            <mesh 
-                geometry={shotcreteGeo} 
-                scale={[0.99, 0.99, 0.99]} 
-            >
-                <meshBasicMaterial color="#475569" wireframe clippingPlanes={[clipPlane]} transparent opacity={0.3} />
-            </mesh>
-        )}
-
-        {/* Rock Bolts */}
-        {stage >= 1 && (
-             <group>
-                 {bolts.map((b, i) => (
-                     <group key={i} position={b.pos} quaternion={b.quat}>
-                         {/* Bolt Shaft */}
-                         <mesh position={[0, b.len/2 + outerRadius, 0]}>
-                             <cylinderGeometry args={[0.05, 0.05, b.len]} />
-                             <meshStandardMaterial color="#1e3a8a" clippingPlanes={[clipPlane]} />
-                         </mesh>
-                         {/* Face Plate */}
-                         <mesh position={[0, outerRadius, 0]}>
-                             <boxGeometry args={[0.3, 0.05, 0.3]} />
-                             <meshStandardMaterial color="#172554" clippingPlanes={[clipPlane]} />
-                         </mesh>
-                     </group>
-                 ))}
-             </group>
-        )}
-    </group>
-  );
-};
-
-// --- Geology Volume (Enhanced with Procedural Textures) ---
-
-// Extract single layer mesh to use hooks correctly
-const GeologyLayerMesh: React.FC<{
-  layer: GeologicalLayer;
-  yPos: number;
-  depth: number;
-  clipPlane: THREE.Plane;
-  onClick: (e: any, props: any) => void;
-  isHighlighted: boolean;
-  currentY: number;
-}> = ({ layer, yPos, depth, clipPlane, onClick, isHighlighted, currentY }) => {
-    // Generate texture using hook at component level
-    const texture = useMemo(() => {
-        const tex = generateGeoTexture(layer.type, layer.color);
-        // Scale texture repeat to keep visual density roughly consistent.
-        // We use a base scale factor (e.g. 1 unit of texture = 5 meters)
-        // Texture is 512px. Let's assume it maps to a 5x5m area by default.
-        // The mesh top face is 30x40. Side face is 30xThickness. 
-        // We set repeat to match the largest dimension for reasonable density.
-        tex.repeat.set(4, Math.max(1, layer.thickness / 5)); 
-        return tex;
-    }, [layer.type, layer.color, layer.thickness]);
-    
-    return (
-       <mesh 
-        position={[0, yPos + depth, 0]}
-        onClick={(e) => {
-            e.stopPropagation();
-            onClick(e, { title: `Layer: ${layer.type}`, props: { density: `${layer.density} kN/m³`, depth: `${currentY}m`, permeability: layer.permeability }});
-        }}
-       >
-          <boxGeometry args={[30, layer.thickness, 40]} />
-          <meshStandardMaterial 
-            map={texture}
-            color={layer.color} 
-            transparent 
-            opacity={isHighlighted ? 0.8 : 0.4} 
-            depthWrite={false}
-            side={THREE.DoubleSide}
-            clippingPlanes={[clipPlane]}
-            emissive={isHighlighted ? layer.color : "black"}
-            emissiveIntensity={isHighlighted ? 0.3 : 0}
-            roughness={0.8}
-          />
-       </mesh>
-    );
-};
-
-const GeologyVolume: React.FC<{ layers: GeologicalLayer[], depth: number, clipPlane: THREE.Plane, onClick: (e: any, props: any) => void, highlightedId?: string | null }> = ({ layers, depth, clipPlane, onClick, highlightedId }) => {
-  let currentY = 0;
-  
-  return (
-    <group position={[0, 0, 0]}>
-       {layers.map((layer) => {
-         const yPos = -currentY - (layer.thickness / 2);
-         // Capture the depth before incrementing for the label
-         const layerDepthLabel = currentY + layer.thickness;
-         currentY += layer.thickness;
-         const isHighlighted = highlightedId === layer.id;
-         
-         return (
-             <GeologyLayerMesh 
-                key={layer.id}
-                layer={layer}
-                yPos={yPos}
-                depth={depth}
-                clipPlane={clipPlane}
-                onClick={onClick}
-                isHighlighted={isHighlighted}
-                currentY={layerDepthLabel}
-             />
-         );
-       })}
-       {/* Reference Surface */}
-       <gridHelper position={[0, depth, 0]} args={[50, 50]} />
-    </group>
-  );
-};
-
-// --- GWT Visualizer ---
-const GWTVisualizer: React.FC<{ level: number, radius: number, clipPlane: THREE.Plane }> = ({ level, radius, clipPlane }) => {
-    const y = (radius) + level; 
-    
-    return (
-        <mesh position={[0, y, 0]} rotation={[-Math.PI/2, 0, 0]}>
-             <planeGeometry args={[30, 40]} />
-             <meshBasicMaterial color="#3b82f6" transparent opacity={0.2} side={THREE.DoubleSide} clippingPlanes={[clipPlane]} />
-        </mesh>
-    );
-};
-
-
-// --- Main Scene Component ---
-const TunnelScene: React.FC<ThreeViewProps & { clipPlane: THREE.Plane, setInspect: (e: any, d: any) => void }> = ({ design, layers, slice, simulation, clipPlane, setInspect, highlightedLayerId }) => {
-    const zPos = ((slice / 100) * 40) - 20;
-    useFrame(() => { clipPlane.constant = -zPos; });
-
-    // Generate Alignment Curve
-    const alignmentCurve = useMemo(() => {
-        const points = [];
-        const length = 40;
-        const R = design.horizontalRadius || 10000; // Avoid divide by zero
-        const G = design.verticalGrade / 100; // Percentage to decimal
-        
-        for(let i=0; i<=20; i++) {
-            const z = (i/20) * length - length/2;
-            // Horizontal Curve: x ≈ z^2 / 2R (Small angle approx)
-            const x = (z * z) / (2 * R);
-            // Vertical Grade: y = z * grade
-            const y = z * G;
-            points.push(new THREE.Vector3(x, y, z));
-        }
-        return new THREE.CatmullRomCurve3(points);
-    }, [design.horizontalRadius, design.verticalGrade]);
-
-    return (
-        <>
-            <group position={[0, 0, 0]}>
-                {design.method === ConstructionMethod.TBM && design.shape === TunnelShape.Circular ? (
-                    <SegmentedLining design={design} clipPlane={clipPlane} onClick={setInspect} curve={alignmentCurve} />
-                ) : (
-                    <NATMSupport design={design} stage={simulation.natmSequence} clipPlane={clipPlane} onClick={setInspect} curve={alignmentCurve} />
-                )}
-            </group>
-            <GeologyVolume layers={layers} depth={design.depth} clipPlane={clipPlane} onClick={setInspect} highlightedId={highlightedLayerId} />
-            
-            <WaterIngressSystem design={design} waterLevel={simulation.waterTableLevel} clipPlane={clipPlane} />
-            {simulation.waterTableLevel > -20 && <GWTVisualizer level={simulation.waterTableLevel} radius={design.height/2} clipPlane={clipPlane} />}
-            
-            {simulation.showHydrostaticVectors && simulation.waterTableLevel > -10 && (
-                <HydrostaticVectors design={design} waterLevel={simulation.waterTableLevel} curve={alignmentCurve} />
-            )}
-
-            {simulation.showStress && <StressHalo design={design} sliceZ={zPos} clipPlane={clipPlane} />}
-            {simulation.showGrouting && <GroutingFan radius={design.width/2} clipPlane={clipPlane} />}
-            {simulation.showAlignment && <AlignmentSystem curve={alignmentCurve} clipPlane={clipPlane} />}
-            
-            {/* New Advanced Visualizations */}
-            {simulation.showBMD && <BendingMomentDiagram design={design} sliceZ={zPos} />}
-            {simulation.showSettlement && <SettlementVolume design={design} sliceZ={zPos} />}
-
-            {/* Cut Plane Visualizer */}
-            <mesh position={[0, 0, zPos]}>
-                <planeGeometry args={[30, 30]} />
-                <meshBasicMaterial color="#ef4444" wireframe transparent opacity={0.1} />
-            </mesh>
-        </>
-    );
-};
-
-export const ThreeView: React.FC<ThreeViewProps> = ({ design, layers, slice, simulation, highlightedLayerId }) => {
-  const clipPlane = useMemo(() => new THREE.Plane(new THREE.Vector3(0, 0, -1), 0), []);
-  const [inspectData, setInspectData] = useState<any | null>(null);
-  const [showHUD, setShowHUD] = useState(true);
-
-  const handleMiss = () => setInspectData(null);
-  const handleInspect = (e: any, data: any) => {
-    setInspectData({ point: e.point, title: data.title, props: data.props });
-  };
-
-  return (
-    <div className="w-full h-full bg-slate-900 rounded-2xl overflow-hidden shadow-inner relative group select-none">
-      
-      {/* Borehole Log Overlay */}
-      {simulation.showBorehole && (
-          <div className="absolute top-4 left-4 z-20">
-              <BoreholeLog layers={layers} depth={design.depth} />
-          </div>
-      )}
-
-      {/* Advanced Metrics Overlay */}
-      <div className="absolute bottom-4 left-4 z-20">
-          <AdvancedMetricsPanel layers={layers} design={design} waterLevel={simulation.waterTableLevel} />
-      </div>
-
-      {/* 3D View Control HUD */}
-      <div className={`absolute top-4 right-4 z-20 transition-all duration-300 ${showHUD ? 'w-48' : 'w-10 h-10'} flex flex-col items-end`}>
-          <button 
-             onClick={() => setShowHUD(!showHUD)} 
-             className="bg-slate-800/80 hover:bg-slate-700 text-white p-2 rounded-full shadow-lg backdrop-blur-md mb-2 z-30 border border-slate-600"
-          >
-             {showHUD ? <EyeSlashIcon className="w-4 h-4" /> : <EyeIcon className="w-4 h-4" />}
-          </button>
-          
-          {showHUD && (
-              <div className="bg-slate-800/80 backdrop-blur-md p-3 rounded-xl border border-slate-600 shadow-xl w-full text-white text-xs space-y-2 animate-in slide-in-from-top-2">
-                 <div className="font-bold border-b border-slate-600 pb-1 flex items-center gap-2">
-                    <ViewfinderCircleIcon className="w-4 h-4 text-blue-400"/> Scene Controls
-                 </div>
-                 <div className="flex justify-between">
-                    <span>Camera</span>
-                    <span className="text-slate-400">Orbit</span>
-                 </div>
-                 <div className="flex justify-between">
-                    <span>Clip Plane</span>
-                    <span className="text-slate-400">{slice}%</span>
-                 </div>
-                 <div className="flex justify-between">
-                    <span>Layers</span>
-                    <span className="text-slate-400">{layers.length} Active</span>
-                 </div>
-                 {simulation.waterTableLevel > 0 && (
-                     <div className="text-blue-300 font-semibold bg-blue-900/30 p-1 rounded text-center">
-                        Hydrostatic Pressure
-                     </div>
-                 )}
-              </div>
-          )}
-      </div>
-
-      <Canvas 
-        camera={{ position: [15, 8, 15], fov: 45 }}
-        gl={{ localClippingEnabled: true }}
-        onPointerMissed={handleMiss}
-      >
-        <ambientLight intensity={0.6} />
-        <pointLight position={[10, 20, 10]} intensity={1.2} />
-        <directionalLight position={[-5, 5, 20]} intensity={0.8} />
-        
-        <TunnelScene 
-            design={design} 
-            layers={layers} 
-            slice={slice} 
-            simulation={simulation}
-            clipPlane={clipPlane} 
-            setInspect={handleInspect}
-            highlightedLayerId={highlightedLayerId}
-        />
-        
-        <Inspector data={inspectData} clear={() => setInspectData(null)} />
-        
-        <OrbitControls 
-          enableDamping 
-          ref={(ref: any) => {
-            if (ref) {
-              ref.minDistance = 5;
-              ref.maxDistance = 50;
-            }
-          }} 
-        />
-        <Environment preset="city" />
-      </Canvas>
-    </div>
-  );
-};
+    {[0.13,Math.max(0.14,r.length-0.14)].map((z,k)=><mesh key={k} position={[radius*Math.cos(angle+0.06),radius*Math.sin(angle+0.06),z]} rotation={[0,0,angle-Math.PI/2]}><cylinderGeometry args={[0.045,0.045,0.018,6]}/><meshStandardMaterial color="#707779" metalness={0.7} roughness={0.5}/></mesh>)}
+   </group>;
+  })}
+  {design.method===ConstructionMethod.NATM && Array.from({length:7},(_,j)=>{
+   const angle=(j+0.5)/7*Math.PI, a=design.width/2,b=Math.min(design.width/2,height/2),spring=height/2-b;
+   return <group key={j} position={[a*Math.cos(angle),spring+b*Math.sin(angle),r.length/2]} rotation={[0,0,angle-Math.PI/2]}><mesh position={[0,design.boltLength/2,0]}><cylinderGeometry args={[0.025,0.025,design.boltLength,6]}/><meshStandardMaterial color="#88959b" metalness={0.7}/></mesh><mesh><boxGeometry args={[0.19,0.035,0.19]}/><meshStandardMaterial color="#465159"/></mesh></group>;
+  })}
+ </group>)}</group>;
+});
+function FitCamera({mode,design,station,reset}:{mode:string;design:TunnelDesign;station:number;reset:number}) {
+ const {camera}=useThree();
+ useEffect(()=>{
+  if(mode==='inside')camera.position.copy(new THREE.Vector3(0,-sectionDimensions(design).height*.08,0).applyQuaternion(transform(design,18).quaternion).add(transform(design,18).position));
+  else if(mode==='section')camera.position.copy(new THREE.Vector3(0,0,design.width*2.1).applyQuaternion(transform(design,station).quaternion).add(transform(design,station).position));
+  else camera.position.set(design.width*1.5,design.width*0.9,19);
+  if(mode==='section')camera.lookAt(transform(design,station).position);else if(mode==='inside')camera.lookAt(new THREE.Vector3(...alignment(design,-18)));else camera.lookAt(0,0,0);camera.updateProjectionMatrix();
+ },[camera,mode,design.width,design.height,design.shape,mode==='section'?station:0,reset]);return null;
+}
+function Scene({design,layers,slice,simulation,highlightedLayerId,mode,ground,reset}:ThreeViewProps&{mode:string;ground:boolean;reset:number}) {
+ const m=evaluateTunnel(design,layers,simulation), {height}=sectionDimensions(design);
+ const end=-20+slice/100*40;
+ const planes=useMemo(()=>{const f=transform(design,end),n=new THREE.Vector3(0,0,-1).applyQuaternion(f.quaternion);return mode==='inside'?[]:[new THREE.Plane().setFromNormalAndCoplanarPoint(n,f.position)];},[mode,end,design.horizontalRadius,design.verticalGrade]);
+ const asphalt=useMemo(()=>surfaceTexture('asphalt'),[]),sign=useMemo(()=>surfaceTexture('sign'),[]);
+ useEffect(()=>()=>{asphalt.dispose();sign.dispose();},[asphalt,sign]);
+ const {gl}=useThree();
+ useEffect(()=>{gl.clippingPlanes=planes;return()=>{gl.clippingPlanes=[];};},[gl,planes]);
+ const floor=-height/2+design.wallThickness+height*0.12;
+ const floorWidth=design.shape===TunnelShape.Circular?2*Math.sqrt(Math.max(0,(design.width/2-design.wallThickness)**2-floor**2)):design.width-2*design.wallThickness;
+ const showServices=floorWidth>=1.8 && height-2*design.wallThickness>=2.4;
+ const sections=Array.from({length:40},(_,i)=>transform(design,i-19.5));
+ let top=0;
+ const crossSectionStation=Math.min(19.9,end-0.04), frame=transform(design,crossSectionStation);
+ const waterY=height/2+simulation.waterTableLevel;
+ return <>
+  <color attach="background" args={['#111c27']}/><fog attach="fog" args={['#111c27',65,150]}/>
+  <hemisphereLight args={['#c6def1','#38372f',mode==='inside'?0.65:1.3]}/>
+  <directionalLight position={[8,18,12]} intensity={mode==='inside'?0.5:2.4} castShadow shadow-mapSize={[2048,2048]}/>
+  <Lining design={design}/>
+  {sections.map((f,i)=><group key={i} position={f.position} quaternion={f.quaternion}>
+   <mesh position={[0,floor-0.12,0]} receiveShadow><boxGeometry args={[floorWidth,0.24,1.025]}/><meshStandardMaterial color="#68757a" map={asphalt} bumpMap={asphalt} bumpScale={.025} roughness={0.88}/></mesh>
+   {showServices&&[-1,1].map(side=><group key={side}>
+    <mesh position={[side*(floorWidth/2-0.22),floor+0.07,0]} receiveShadow><boxGeometry args={[0.44,0.14,1.025]}/><meshStandardMaterial color="#979b98" roughness={0.9}/></mesh>
+    <mesh position={[side*(floorWidth/2-0.48),floor+0.008,0]}><boxGeometry args={[0.08,0.012,1.025]}/><meshStandardMaterial color="#d2b969"/></mesh>
+    {i%2===0&&<mesh position={[side*(floorWidth/2-0.2),floor+0.47,0]} castShadow><cylinderGeometry args={[.025,.025,.78,8]}/><meshStandardMaterial color="#819197" metalness={.75} roughness={.35}/></mesh>}
+    <mesh position={[side*(floorWidth/2-.58),floor+.015,0]}><boxGeometry args={[.1,.025,.9]}/><meshStandardMaterial color="#202c31" metalness={.4} roughness={.8}/></mesh>
+    {i%2===0&&<mesh position={[side*(floorWidth/2-.58),floor+.035,0]}><boxGeometry args={[.1,.008,.03]}/><meshStandardMaterial color="#63747b" metalness={.7}/></mesh>}
+    <mesh position={[side*(floorWidth/2-0.2),floor+0.85,0]}><boxGeometry args={[0.08,0.08,1.025]}/><meshStandardMaterial color="#8c999f" metalness={0.65} roughness={0.4}/></mesh>
+   </group>)}
+   {showServices&&<group><mesh position={[design.width*.26,height*.24,0]} rotation={[Math.PI/2,0,0]}><cylinderGeometry args={[.065,.065,1.025,10]}/><meshStandardMaterial color="#926852" metalness={.35} roughness={.6}/></mesh>
+   <mesh position={[-design.width*.28,height*.23,0]}><boxGeometry args={[.22,.07,1.025]}/><meshStandardMaterial color="#56656a" metalness={.7} roughness={.55}/></mesh>
+   {i%4===0&&<mesh position={[-design.width*.28,height*.23-.12,0]}><boxGeometry args={[.05,.25,.04]}/><meshStandardMaterial color="#67757b" metalness={.6}/></mesh>}
+   {i%12===0&&<group><mesh position={[floorWidth/2-.2,floor+1.35,0]} castShadow><boxGeometry args={[.28,.6,.18]}/><meshStandardMaterial color="#a44235" roughness={.5}/></mesh><mesh position={[-floorWidth/2+.22,floor+1.7,.1]}><planeGeometry args={[.42,.42]}/><meshStandardMaterial map={sign} emissiveMap={sign} emissive="#b6f8cc" emissiveIntensity={.65} side={THREE.DoubleSide}/></mesh></group>}
+   </group>}
+   {i%4===0 && <group><mesh position={[0,height/2-design.wallThickness-0.16,0]}><boxGeometry args={[Math.min(1.2,design.width/4),0.08,0.6]}/><meshStandardMaterial color="#fff5dc" emissive="#fff1ce" emissiveIntensity={1.6}/></mesh><pointLight position={[0,height/2-design.wallThickness-0.4,0]} intensity={22} distance={9} decay={2}/></group>}
+  </group>)}
+  {ground && layers.map(layer=>{const y=m.axisDepth-top-layer.thickness/2;top+=layer.thickness;return <mesh key={layer.id} position={[-design.width/2-4,y,0]}><boxGeometry args={[5,layer.thickness,40]}/><meshStandardMaterial color={layer.color} transparent opacity={highlightedLayerId===layer.id?0.85:0.35} roughness={1} depthWrite={false}/></mesh>;})}
+  {ground && <gridHelper position={[0,m.axisDepth,0]} args={[60,30,'#526854','#35443c']}/>}
+  {ground && <mesh position={[0,waterY,0]} rotation={[-Math.PI/2,0,0]}><planeGeometry args={[30,40]}/><meshBasicMaterial color="#359adc" transparent opacity={0.13} side={THREE.DoubleSide} depthWrite={false}/></mesh>}
+  {simulation.showAlignment && <Line points={Array.from({length:81},(_,i)=>alignment(design,-20+i/2))} color="#7fe2aa" dashed dashSize={0.5} gapSize={0.3}/>}
+  {simulation.showHydrostaticVectors && <group position={frame.position} quaternion={frame.quaternion}>{boundarySamples(design).map(({x,y,nx,ny},i)=>{
+   const u=9.81*Math.max(0,waterY-new THREE.Vector3(x,y,0).applyQuaternion(frame.quaternion).add(frame.position).y);if(u===0)return null;
+   const direction=new THREE.Vector3(-nx,-ny,0);const point=new THREE.Vector3(x,y,0).addScaledVector(direction,-Math.min(3,u/100));
+   return <arrowHelper key={i} args={[direction,point,Math.min(3,u/100),0x45bfff,0.15,0.09]}/>;
+  })}</group>}
+  {simulation.showStress && <group position={frame.position} quaternion={frame.quaternion}>{boundarySamples(design).map(({x,y,nx,ny},i)=>{
+   const p=m.pressureAt(m.axisDepth-new THREE.Vector3(x,y,0).applyQuaternion(frame.quaternion).add(frame.position).y);if(!p)return null;
+   const force=new THREE.Vector3(-nx*p.horizontal,-ny*p.total,0), len=Math.min(3,force.length()/200);
+   const direction=force.normalize(), point=new THREE.Vector3(x,y,0).addScaledVector(direction,-len);
+   return <arrowHelper key={i} args={[direction,point,len,0xffb657,0.15,0.09]}/>;
+  })}</group>}
+  {simulation.showSettlement && m.settlementMax!==null && <Line points={Array.from({length:101},(_,i):[number,number,number]=>{const x=(i-50)/50*3*m.troughWidth;return [x,m.axisDepth-(m.settlementAt(x)??0)*100,end-0.1];})} color="#f0b85c" lineWidth={3}/>}
+  <FitCamera mode={mode} design={design} station={end} reset={reset}/>
+  <OrbitControls key={`${mode}-${reset}`} makeDefault target={mode==='section'?transform(design,end).position:mode==='inside'?alignment(design,-18):[0,0,0]} minDistance={0.5} maxDistance={120}/>
+ </>;
+}
+export function ThreeView(props:ThreeViewProps) {
+ const [mode,setMode]=useState('inside'),[ground,setGround]=useState(false),[reset,setReset]=useState(0);
+ const {height}=sectionDimensions(props.design);
+ return <div className="w-full h-full min-h-[400px] bg-slate-900 relative rounded-lg overflow-hidden">
+  <div className="absolute top-4 left-4 right-4 z-10 flex justify-between gap-2 flex-wrap">
+   <div className="bg-slate-950/80 rounded-lg p-1 flex gap-1">{['overview','section','inside'].map(v=><button key={v} onClick={()=>setMode(v)} aria-pressed={v===mode} className={`px-3 py-2 text-xs rounded capitalize ${v===mode?'bg-blue-600 text-white':'text-slate-300'}`}>{v}</button>)}</div>
+   <div className="flex gap-2"><button onClick={()=>setReset(v=>v+1)} className="text-xs text-white bg-slate-800/90 px-3 py-2 rounded-lg min-h-[40px]">Reset view</button><button onClick={()=>setGround(!ground)} aria-pressed={ground} className="text-xs text-white bg-slate-800/90 px-3 py-2 rounded-lg">{ground?'Hide':'Show'} geology</button></div>
+  </div>
+  <Canvas frameloop="demand" shadows dpr={[1,1.5]} camera={{fov:48,near:0.05,far:300}} gl={{antialias:true,localClippingEnabled:true}}><Scene {...props} mode={mode} ground={ground} reset={reset}/></Canvas>
+  <div className="absolute bottom-4 left-4 right-4 text-xs text-slate-300 pointer-events-none space-y-1 bg-slate-950/80 rounded-lg p-3">
+   <p className="text-white font-semibold">{props.design.method} · {props.design.shape} · {props.design.width.toFixed(1)} × {height.toFixed(1)} m outer section</p>
+   <p>40 m alignment · {Math.round(props.design.wallThickness*1000)} mm lining · {props.design.verticalGrade}% grade</p>
+   <p>Drag to orbit · scroll to zoom · fittings illustrate scale, not clearance compliance.</p>
+   {props.simulation.showSettlement && <p className="text-amber-300">Gaussian settlement line · vertical displacement exaggerated ×100</p>}
+   {props.simulation.showStress && <p className="text-amber-300">Far-field total stress traction · 1 m arrow / 200 kPa, capped at 3 m · not lining stress</p>}
+   {props.simulation.showHydrostaticVectors && <p className="text-blue-300">Hydrostatic pressure · 1 m arrow / 100 kPa, capped at 3 m</p>}
+   {props.simulation.showBMD && <p className="text-amber-300">Bending moment unavailable: requires a calibrated structural analysis.</p>}
+   {props.simulation.showBorehole && ground && <p>Layer log shown beside alignment; ground surface is at the reference invert depth.</p>}
+  </div>
+ </div>;
+}

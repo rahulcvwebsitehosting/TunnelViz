@@ -26,7 +26,8 @@ export interface GeologicalLayer {
   type: GeoMaterial;
   thickness: number; // meters
   color: string;
-  density: number; // kN/m3
+  density: number; // moist unit weight, kN/m3 (legacy field name)
+  saturatedUnitWeight?: number; // kN/m3
   permeability: 'Low' | 'Medium' | 'High'; // New for GWT logic
   spt_n?: number; // Standard Penetration Test value (Soil)
   rqd?: number; // Rock Quality Designation % (Rock)
@@ -51,6 +52,10 @@ export interface TunnelDesign {
 }
 
 export interface SimulationSettings {
+  surcharge?: number;
+  earthPressureCoefficient?: number;
+  volumeLossPercent?: number;
+  troughWidthFactor?: number;
   waterTableLevel: number; // Relative to tunnel crown (positive = above)
   natmSequence: number; 
   deviation: number; 

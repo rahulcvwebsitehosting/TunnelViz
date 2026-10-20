@@ -20,10 +20,13 @@ import {
   AdjustmentsHorizontalIcon, 
   ArrowRightIcon
 } from '@heroicons/react/24/outline';
-import { AppView, ConstructionMethod } from '../types';
+import { sectionArea, sectionDimensions } from '../services/engineering';
+import { AppView, ConstructionMethod, type TunnelDesign, type GeologicalLayer } from '../types';
 
 // --- Types & Constants ---
 interface ComparatorProps {
+    design: TunnelDesign;
+    layers: GeologicalLayer[];
     onNavigate: (view: AppView, moduleId?: string) => void;
 }
 
@@ -69,15 +72,15 @@ const METHODS: Record<string, MethodData> = {
     }
 };
 
-const GROUND_TYPES = ['Soft Clay', 'Mixed Ground', 'Hard Rock'] as const;
+
 
 // --- Helper Components ---
 
 const RiskIcon = ({ level }: { level: SuitabilityLevel }) => {
     switch(level) {
-        case 'High': return <CheckCircleIcon className="w-6 h-6 text-green-500" />;
-        case 'Medium': return <ExclamationTriangleIcon className="w-6 h-6 text-yellow-500" />;
-        case 'Low': return <XCircleIcon className="w-6 h-6 text-red-500" />;
+        case 'High': return <CheckCircleIcon aria-label="Favorable scenario assumption" role="img" className="w-6 h-6 text-green-500" />;
+        case 'Medium': return <ExclamationTriangleIcon aria-label="Requires investigation" role="img" className="w-6 h-6 text-yellow-500" />;
+        case 'Low': return <XCircleIcon aria-label="Less favorable scenario assumption" role="img" className="w-6 h-6 text-red-500" />;
         default: return <span className="text-slate-300">-</span>;
     }
 };
@@ -89,7 +92,7 @@ interface NeuCardProps {
 }
 
 const NeuCard = ({ children, title, icon }: NeuCardProps) => (
-    <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 flex flex-col h-full">
+    <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 flex flex-col h-full min-h-[280px]">
         <div className="flex items-center gap-2 mb-4 border-b border-slate-100 pb-2">
             <div className="text-slate-400 w-5 h-5">{icon}</div>
             <h3 className="font-bold text-slate-700 text-sm uppercase tracking-wider">{title}</h3>
@@ -100,10 +103,17 @@ const NeuCard = ({ children, title, icon }: NeuCardProps) => (
 
 // --- Main Component ---
 
-export const ComparisonCharts: React.FC<ComparatorProps> = ({ onNavigate }) => {
+export const ComparisonCharts: React.FC<ComparatorProps> = ({ onNavigate, design, layers }) => {
   // Scenario State
   const [length, setLength] = useState(1500); // meters
-  const [ground, setGround] = useState<typeof GROUND_TYPES[number]>('Mixed Ground');
+  const axisDepth=design.depth-sectionDimensions(design).height/2;
+  let accumulated=0;
+  const activeLayer=layers.find(l=>{accumulated+=l.thickness;return accumulated>=axisDepth;});
+  const crownDepth=design.depth-sectionDimensions(design).height;
+  let top=0;const faceLayers=layers.filter(l=>{const bottom=top+l.thickness;const hit=bottom>crownDepth&&top<design.depth;top=bottom;return hit;});
+  const ground=faceLayers.length>1?'Mixed Ground':activeLayer && /Rock|Granite/.test(activeLayer.type)?'Hard Rock':activeLayer?.type.includes('Clay')?'Soft Clay':'Granular soil';
+  const covered=crownDepth>0&&design.depth<=layers.reduce((sum,l)=>sum+l.thickness,0);
+  const areaFactor=sectionArea(design)/(Math.PI*9);
   
   // Targets (for visual reference lines)
   const targetRate = 10; 
@@ -111,6 +121,7 @@ export const ComparisonCharts: React.FC<ComparatorProps> = ({ onNavigate }) => {
 
   // Analysis Engine
   const analysis = useMemo(() => {
+      if (!activeLayer || !covered) return [];
       return Object.values(METHODS).map(m => {
           // Adjust rate/cost based on ground
           let rateMod = 1;
@@ -124,10 +135,10 @@ export const ComparisonCharts: React.FC<ComparatorProps> = ({ onNavigate }) => {
               if(m.name === 'NATM') { rateMod = 0.7; costMod = 1.1; } // Support heavy
           }
 
-          const effectiveRate = m.baseRate * rateMod;
+          const effectiveRate = m.baseRate * rateMod / Math.sqrt(areaFactor);
           const excavationTime = Math.ceil(length / effectiveRate);
           const totalTime = m.mobTime + excavationTime + m.demobTime;
-          const totalCost = (m.baseCost * costMod) * length;
+          const totalCost = (m.baseCost * costMod * areaFactor) * length;
 
           // Suitability Logic
           let suitability: SuitabilityLevel = 'Medium';
@@ -144,7 +155,7 @@ export const ComparisonCharts: React.FC<ComparatorProps> = ({ onNavigate }) => {
           }
 
           // Depth constraint logic (simplified for visualization)
-          if(m.name === 'Cut & Cover' && length > 5000) suitability = 'Low'; // Not for long tunnels usually
+          if(m.name === 'Cut & Cover' && design.depth > 20) suitability = 'Low'; // Not for long tunnels usually
 
           return {
               ...m,
@@ -152,16 +163,16 @@ export const ComparisonCharts: React.FC<ComparatorProps> = ({ onNavigate }) => {
               excavationTime,
               totalTime,
               totalCost,
-              costPerM: m.baseCost * costMod,
+              costPerM: m.baseCost * costMod * areaFactor,
               suitability
           };
       });
-  }, [length, ground]);
+  }, [length, ground, areaFactor, design.depth, activeLayer, covered]);
 
   return (
     <div className="h-full flex flex-col space-y-6">
       
-      {/* 1. Scenario Input Tool */}
+      <p className="text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded-xl p-4">Illustrative planning exercise only. Rates and costs are uncalibrated assumptions, scaled from a 6 m reference tunnel by selected excavation area. These are not market quotes, schedules or engineering method recommendations. Current invert: {design.depth} m; excavation area: {sectionArea(design).toFixed(1)} m².</p>
       <div className="bg-slate-800 text-white p-4 rounded-2xl shadow-lg flex flex-col md:flex-row items-center gap-6 z-10 sticky top-0">
           <div className="flex items-center gap-2 font-bold text-blue-300">
               <AdjustmentsHorizontalIcon className="w-5 h-5" /> Scenario Builder
@@ -174,7 +185,7 @@ export const ComparisonCharts: React.FC<ComparatorProps> = ({ onNavigate }) => {
                       <span>{length} m</span>
                   </div>
                   <input 
-                    type="range" min="100" max="5000" step="100" 
+                    aria-label="Comparison tunnel length" type="range" min="100" max="5000" step="100"
                     value={length} onChange={(e) => setLength(Number(e.target.value))}
                     className="w-full h-2 bg-slate-600 rounded-lg appearance-none cursor-pointer accent-blue-500"
                   />
@@ -182,24 +193,17 @@ export const ComparisonCharts: React.FC<ComparatorProps> = ({ onNavigate }) => {
               <div>
                    <div className="text-xs font-bold uppercase mb-1 text-slate-400">Ground Condition</div>
                    <div className="flex bg-slate-700 rounded-lg p-1">
-                       {GROUND_TYPES.map(g => (
-                           <button 
-                            key={g} 
-                            onClick={() => setGround(g)}
-                            className={`flex-1 text-xs py-1 rounded-md font-bold transition-colors ${ground === g ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}
-                           >
-                               {g}
-                           </button>
-                       ))}
+                       <span className="text-xs p-2">{ground} · from materials across the selected excavation face</span>
                    </div>
               </div>
           </div>
       </div>
 
+      {!covered && <p role="status" className="p-4 bg-amber-50 text-amber-900 rounded-lg">Comparison is unavailable: the tunnel must be buried and its invert covered by the entered geological log. Adjust the geometry or extend the ground profile.</p>}
       <div className="flex-1 overflow-y-auto pr-2 space-y-6">
         
         {/* 2. Top Row: Metrics & Risk */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[350px]">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:h-[350px]">
             {/* Metric: Cost */}
             <NeuCard title="Unit Cost (€/m)" icon={<CurrencyDollarIcon />}>
                 <ResponsiveContainer width="100%" height="100%">
@@ -237,7 +241,7 @@ export const ComparisonCharts: React.FC<ComparatorProps> = ({ onNavigate }) => {
             </NeuCard>
 
             {/* Risk Matrix */}
-            <NeuCard title="Geological Suitability" icon={<ExclamationTriangleIcon />}>
+            <NeuCard title="Illustrative method fit" icon={<ExclamationTriangleIcon />}>
                 <div className="h-full flex flex-col justify-center overflow-auto">
                     <table className="w-full text-sm text-left">
                         <thead className="text-xs text-slate-400 uppercase border-b border-slate-100">
@@ -253,7 +257,7 @@ export const ComparisonCharts: React.FC<ComparatorProps> = ({ onNavigate }) => {
                                     <td className="py-3 font-bold" style={{color: m.color}}>{m.name}</td>
                                     <td className="py-3 text-center"><RiskIcon level={m.suitability} /></td>
                                     <td className="py-3 text-xs text-slate-500">
-                                        {m.suitability === 'High' ? 'Optimal choice' : m.suitability === 'Medium' ? 'Feasible with measures' : 'High risk / Not recommended'}
+                                        {m.suitability === 'High' ? 'Favorable scenario assumption' : m.suitability === 'Medium' ? 'Requires investigation' : 'Less favorable assumption'}
                                     </td>
                                 </tr>
                             ))}

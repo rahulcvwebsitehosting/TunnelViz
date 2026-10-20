@@ -1,7 +1,13 @@
+import { engineeringReferences, RESEARCH_REVIEW_DATE } from './research';
 
 import { LearningModule } from '../types';
 
 export const LEARNING_MODULES: LearningModule[] = [
+  {
+    id: 'research', title: 'Research & calculation methods', requiredXP: 0,
+    chapters: engineeringReferences.map(r => ({title: `${r.year} · ${r.title}`, link:r.url,
+      content: `<h3>${r.status}</h3><p>${r.detail}</p><p>Literature checked ${RESEARCH_REVIEW_DATE}. This is a curated selection, not all published tunnel research. Research review entries are not executable models.</p><p><a href="${r.url}" target="_blank" rel="noreferrer">Read primary source</a></p>`}))
+  },
   {
     id: 'mod1',
     title: '1. Tunnel Engineering Fundamentals',
@@ -240,7 +246,7 @@ export const LEARNING_MODULES: LearningModule[] = [
                 <ol class="list-decimal pl-6 space-y-4 mb-4 marker:text-blue-600 marker:font-bold">
                     <li>
                         <strong>Ground Reaction Curve (GRC):</strong> 
-                        This curve starts at the in-situ stress ($P_0$). As the tunnel converges ($u$ increases), the required support pressure decreases because the rock creates a self-supporting arch. However, if displacement exceeds a critical limit, the rock behaves plastically and pressure increases again due to loosening.
+                        This curve starts at the in-situ stress ($P_0$). As the tunnel converges ($u$ increases), the required support pressure decreases because the rock creates a self-supporting arch. The post-yield response depends on constitutive behavior and failure mechanisms; a rising branch is not universal.
                     </li>
                     <li>
                         <strong>Support Characteristic Curve (SCC):</strong> 
@@ -248,7 +254,7 @@ export const LEARNING_MODULES: LearningModule[] = [
                     </li>
                     <li>
                         <strong>Equilibrium:</strong> 
-                        Design safety is achieved when the SCC intersects the GRC in the stable elastic-plastic zone. The Factor of Safety is defined by the capacity of the lining versus the load at this intersection.
+                        The intersection represents a model equilibrium, not proof of safety. Verify support capacity, deformation, installation timing, ground failure and applicable limit states independently.
                     </li>
                 </ol>
             `
@@ -270,7 +276,7 @@ export const LEARNING_MODULES: LearningModule[] = [
                 <h4 class="text-lg font-bold mb-2 text-slate-700">The Capacity Interaction Diagram (M-N)</h4>
                 <p class="mb-4">Reinforced concrete sections are checked using an M-N interaction diagram. The combination of Thrust and Moment must fall within the "onion" shape envelope defined by the concrete crushing limit and steel yield limit.</p>
                 <p class="mb-4 font-mono text-sm bg-slate-800 text-white p-2 rounded">Eccentricity (e) = M / N &lt; h/6</p>
-                <p class="text-sm text-slate-500">Ideally, the eccentricity should remain within the middle third of the section thickness ($h$) to avoid tensile cracking.</p>
+                <p class="text-sm text-slate-500">The middle-third rule describes a rectangular, linear-elastic section with no tensile stress; it is not a reinforced-concrete ultimate or serviceability design check. TunnelViz does not calculate bending capacity.</p>
             `
         }
     ],

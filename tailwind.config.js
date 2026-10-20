@@ -1,0 +1,1 @@
+export default {content:['./index.html','./App.tsx','./components/**/*.{ts,tsx}','./data/**/*.ts'],theme:{extend:{fontFamily:{sans:['Segoe UI','Arial','sans-serif'],mono:['Consolas','monospace']}}},plugins:[]};
