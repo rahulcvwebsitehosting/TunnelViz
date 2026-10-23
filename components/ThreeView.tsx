@@ -1,6 +1,6 @@
 import React, { useMemo, useEffect, useState, useCallback } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
-import { Line } from '@react-three/drei';
+import { Html, Line } from '@react-three/drei';
 import * as THREE from 'three';
 import { CameraRig } from './CameraRig';
 import { PlayIcon, PauseIcon, ArrowPathIcon, CubeIcon, ScissorsIcon, EyeIcon, Square3Stack3DIcon } from '@heroicons/react/24/outline';
@@ -117,6 +117,11 @@ function Scene({design,layers,slice,simulation,highlightedLayerId,mode,ground,re
    return <arrowHelper key={i} args={[direction,point,len,0xffb657,0.15,0.09]}/>;
   })}</group>}
   {simulation.showSettlement && m.settlementMax!==null && <Line points={Array.from({length:101},(_,i):[number,number,number]=>{const x=(i-50)/50*3*m.troughWidth;return [x,m.axisDepth-(m.settlementAt(x)??0)*100,end-0.1];})} color="#f0b85c" lineWidth={3}/>}
+  {mode==='section' && <group position={frame.position} quaternion={frame.quaternion}>
+   <Line points={[[-design.width/2,-height/2-.6,.05],[design.width/2,-height/2-.6,.05]]} color="#a4e5db" lineWidth={1}/>
+   {[-1,1].map(side=><Line key={side} points={[[side*design.width/2,-height/2-.3,.05],[side*design.width/2,-height/2-.9,.05]]} color="#a4e5db"/>)}
+   <Html center position={[0,-height/2-.85,.05]} style={{pointerEvents:'none',whiteSpace:'nowrap',background:'#14282d',color:'#ecfff9',padding:'4px 8px',borderRadius:4,fontSize:12}}>{design.width.toFixed(2)} m excavation · {(design.width-2*design.wallThickness).toFixed(2)} m clear width</Html>
+  </group>}
   <CameraRig mode={mode} design={design} station={end} reset={reset} touring={touring} reducedMotion={reducedMotion} animate={animate} onStop={onStop}/>
  </>;
 }

@@ -1,0 +1,15 @@
+import assert from 'node:assert/strict';
+import {siteCalculations,siteDefaults,sectionDXF} from './site';
+import {TunnelShape,ConstructionMethod} from '../types';
+const d={shape:TunnelShape.Circular,width:6,height:6,wallThickness:0.3,depth:20,method:ConstructionMethod.TBM,segmentCount:6,ringWidth:1.5,boltLength:3,boltSpacing:1.5,horizontalRadius:1000,verticalGrade:0};
+const m=siteCalculations(d,siteDefaults,true)!;
+assert.ok(Math.abs(m.pumpPower-3.50357142857)<1e-8);
+assert.ok(Math.abs(m.velocityAir-2.286)<1e-10);
+assert.ok(Math.abs(m.personnelAir-1.8877897728)<1e-10);
+assert.equal(m.minimumAir,m.velocityAir);
+assert.equal(siteCalculations(d,siteDefaults,false)!.minimumAir,m.personnelAir);
+assert.ok(Math.abs(m.excavation-2827.43338823)<1e-7);
+for(const override of [{efficiency:0},{workers:1.2},{freeArea:100},{flow:-1},{head:NaN}])assert.equal(siteCalculations(d,{...siteDefaults,...override},true),null);
+assert.ok(sectionDXF(d).includes('AC1009'));
+assert.equal((sectionDXF(d).match(/\r\nPOLYLINE\r\n/g)||[]).length,2);
+console.log('Site calculations and CAD format checks passed.');

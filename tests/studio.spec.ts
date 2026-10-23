@@ -142,8 +142,13 @@ test('walkthrough visibly travels and the paused camera stays still',async({page
  const moving=await canvas.screenshot();
  expect(moving.equals(before)).toBe(false);
  await page.getByRole('button',{name:'Pause walkthrough'}).click();
- await page.waitForTimeout(600);
- const paused=await canvas.screenshot();
+ // Software WebGL can finish queued frames after the pause event. Require
+ // consecutive stable captures instead of assuming a fixed render latency.
+ let paused=await canvas.screenshot();
+ await expect.poll(async()=>{
+  const next=await canvas.screenshot();
+  const stable=next.equals(paused);paused=next;return stable;
+ },{timeout:10000,intervals:[500]}).toBe(true);
  await page.waitForTimeout(400);
  expect((await canvas.screenshot()).equals(paused)).toBe(true);
 });

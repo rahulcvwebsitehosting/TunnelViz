@@ -32,7 +32,12 @@ export function CameraRig({design,mode,station,reset,touring,reducedMotion,anima
   if(!transition.current){camera.position.copy(destination.current);controls.current.target.copy(target.current);controls.current.update();}
   initialized.current=true;invalidate();
  },[mode,design.width,design.height,design.shape,design.wallThickness,design.horizontalRadius,design.verticalGrade,mode==='section'?station:0,reset,reducedMotion]);
- useEffect(()=>{if(touring)invalidate();},[touring,invalidate]);
+ const wasTouring=useRef(false);
+ useEffect(()=>{
+  if(wasTouring.current&&!touring)transition.current=false;
+  wasTouring.current=touring;
+  invalidate();
+ },[touring,invalidate]);
  useEffect(()=>{
   const stop=()=>{transition.current=false;onStop();invalidate();};
   gl.domElement.addEventListener('pointerdown',stop);

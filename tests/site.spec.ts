@@ -1,0 +1,20 @@
+import {test,expect} from '@playwright/test';
+test('site quantities, invalid input and export workflow',async({page})=>{
+ await page.goto('/');
+ await page.locator('.results-details > summary').click();
+ await page.getByText('Site planning · quantities, ventilation & drainage',{exact:true}).click();
+ await expect(page.getByText('3.504 kW',{exact:true})).toBeVisible();
+ await page.getByLabel('Combined pump + motor efficiency (%)',{exact:true}).fill('0');
+ await expect(page.getByRole('button',{name:'Export calculation record'})).toBeDisabled();
+ await page.getByLabel('Combined pump + motor efficiency (%)',{exact:true}).fill('70');
+ const record=page.waitForEvent('download');
+ await page.getByRole('button',{name:'Export calculation record'}).click();
+ expect((await record).suggestedFilename()).toBe('tunnelviz-site-calculations.json');
+ const cad=page.waitForEvent('download');
+ await page.getByRole('button',{name:'Export section for AutoCAD'}).click();
+ expect((await cad).suggestedFilename()).toBe('tunnelviz-section-metres.dxf');
+ await page.screenshot({path:'docs/site-calculations-desktop.png',fullPage:true});
+ await page.setViewportSize({width:390,height:844});
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+ await page.screenshot({path:'docs/site-calculations-mobile.png',fullPage:true});
+});

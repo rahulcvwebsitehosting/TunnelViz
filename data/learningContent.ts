@@ -285,5 +285,25 @@ export const LEARNING_MODULES: LearningModule[] = [
         { id: 'q10-2', type: 'Definition', question: 'What is the Equilibrium Point in CCM?', answer: 'The intersection of the Ground Reaction Curve (GRC) and the Support Characteristic Curve (SCC).' },
         { id: 'q10-3', type: 'Concept', question: 'Why does the GRC curve initially go down?', answer: 'Because small displacements allow the rock to mobilize its own shear strength (arching), reducing the load on the support.' }
     ]
+  },
+  {
+    id: 'validation',
+    title: 'Validation: benchmarks & settlement study',
+    requiredXP: 0,
+    chapters: [
+      {
+        title: 'Independent benchmark',
+        content: `<p>The repository validation pack compares independent dry-ground, partial-saturation and layered-ground calculations with the application service. Run npm run benchmark in the project.</p><p>Stress outputs are in kPa, unit weights in kN/m³, depth in metres, and settlement in millimetres.</p>`
+      },
+      {
+        title: 'Depth, loss and trough width',
+        content: `<p>The Gaussian settlement model conserves volume: changing depth or trough width spreads the same volume over a different surface width, while volume loss scales the total volume directly.</p><p>These trends are educational assumptions. Real settlement also depends on stiffness, groundwater, face pressure, grouting and construction sequence.</p>`
+      },
+      {
+        title: 'Measured profile comparison',
+        link: 'https://www.mdpi.com/2071-1050/15/17/13265',
+        content: `<p>Simulation of Surface Settlement Induced by Parallel Mechanised Tunnelling (2023) compares a numerical model with measured profiles. This is literature context, not validation of TunnelViz.</p><p>A measured-profile evaluation remains outstanding. Verified marker ordinates and separate calibration and evaluation datasets are required before reporting TunnelViz prediction errors.</p>`
+      }
+    ]
   }
 ];

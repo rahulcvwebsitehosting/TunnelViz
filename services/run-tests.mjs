@@ -5,3 +5,5 @@ await build({entryPoints:['services/engineering.test.ts'],outfile:'.test-output/
 await import('../.test-output/engineering.test.mjs');
 await build({entryPoints:['services/project.test.ts'],outfile:'.test-output/project.test.mjs',bundle:true,platform:'node',format:'esm'});
 await import('../.test-output/project.test.mjs');
+await build({entryPoints:['services/site.test.ts'],outfile:'.test-output/site.test.mjs',bundle:true,platform:'node',format:'esm'});
+await import('../.test-output/site.test.mjs');

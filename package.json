@@ -12,7 +12,8 @@
     "preview": "vite preview",
     "test": "node services/run-tests.mjs",
     "typecheck": "tsc --noEmit",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "benchmark": "node validation/benchmark.mjs"
   },
   "dependencies": {
     "@heroicons/react": "^2.1.3",

@@ -1,4 +1,5 @@
 import React from 'react';
+import { SitePanel } from './SitePanel';
 import { evaluateTunnel } from '../services/engineering';
 import { engineeringReferences, RESEARCH_REVIEW_DATE } from '../data/research';
 import type { TunnelDesign, GeologicalLayer, SimulationSettings } from '../types';
@@ -29,5 +30,6 @@ export function EngineeringPanel({design,layers,simulation,onChange}: {design:Tu
    <p>Volume loss and K₀ are entered assumptions, not inferred from construction method. Bolt and segment settings change geometry, not a claimed capacity. Groundwater alone does not imply leakage through a sealed lining.</p>
   </div></details>
   <details className="text-xs"><summary className="cursor-pointer font-bold">Studies & sources · reviewed {RESEARCH_REVIEW_DATE}</summary><p className="my-3 text-slate-500">Curated primary sources, not an exhaustive or continuously updated literature review. Research summaries are distinguished from implemented calculations.</p>{engineeringReferences.map(r=><article key={r.url} className="border-t py-3 space-y-1"><a className="text-blue-700 underline" href={r.url} target="_blank" rel="noreferrer">{r.title} ({r.year})</a><p className="font-semibold">{r.status}</p><p className="text-slate-500">{r.detail}</p></article>)}</details>
+ <SitePanel design={design}/>
  </section>;
 }
